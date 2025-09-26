@@ -1,0 +1,13 @@
+===== EVAL (raw) =====
+count: 8000.0000
+MAE: 0.0257
+RMSE: 0.0334
+Bias: -0.0014
+Corr: 0.9340
+
+===== EVAL (kalman) =====
+count: 8000.0000
+MAE: 0.0234
+RMSE: 0.0304
+Bias: -0.0014
+Corr: 0.9468

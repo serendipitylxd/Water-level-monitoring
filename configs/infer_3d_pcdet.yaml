@@ -1,0 +1,54 @@
+# Basic Data Path
+data:
+
+  points_dir: "path/to/TROUT/points_test"          # Test Set Point Cloud Directory (.bin) (for 3D)
+  frame_id_regex: "^(.*)\\.(jpg|png|jpeg|bin|npy|pcd)$"   
+
+# 3D Model (Multiple can be provided, ship frame merge output; if gate includes this type, it also participates in OR)
+pcdet_models:
+
+  - name: "pointpillar"
+    config: "path/to/pcdet_models/config/pointpillar.yaml"
+    checkpoint: "path/to/pcdet_models/checkpoint/pointpillar.pth"
+    score_thr: 0.40
+
+  - name: "second"
+    config: "path/to/pcdet_models/config/second.yaml"
+    checkpoint: "path/to/pcdet_models/checkpoint/second.pth"
+    score_thr: 0.40
+
+  - name: "dsvt_voxel"
+    config: "path/to/pcdet_models/config/dsvt_voxel.yaml"
+    checkpoint: "path/to/pcdet_models/checkpoint/dsvt_voxel.pth"
+    score_thr: 0.40
+
+  - name: "voxel_mamba"
+    config: "path/to/pcdet_models/config/voxel_mamba.yaml"
+    checkpoint: "path/to/pcdet_models/checkpoint/voxel_mamba.pth"
+    score_thr: 0.40
+
+  - name: "pv_rcnn"
+    config: "path/to/pcdet_models/config/pv_rcnn.yaml"
+    checkpoint: "path/to/pcdet_models/checkpoint/pv_rcnn.pth"
+    score_thr: 0.40
+
+  - name: "pv_rcnn_plusplus"
+    config: "path/to/pcdet_models/config/pv_rcnn_plusplus.yaml"
+    checkpoint: "path/to/pcdet_models/checkpoint/pv_rcnn_plusplus.pth"
+    score_thr: 0.40
+
+
+# Semantic Tags
+labels:
+  lock_gate: "Lock_gate"
+  ships: ["Fully_loaded_cargo_ship", "Fully_loaded_container_ship", "Unladen_cargo_ship"]
+
+# Determination Geometry (Gate Chamber Coordinates)
+geometry:
+  chamber_x_range: [39.7, 62.7]
+  chamber_y_range: [0, 102.4]
+
+# Output Directory
+output:
+  root: "./outputs"
+

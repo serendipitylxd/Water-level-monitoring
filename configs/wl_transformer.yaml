@@ -1,0 +1,67 @@
+data:
+  points_training_dir: path/to/TROUT/points
+  labels_training_dir: path/to/TROUT/labels
+  points_testing_dir: path/to/TROUT/points_test
+
+output:
+  root: ./outputs
+
+waterlevel:
+  wall_band_x_half: 1.0
+  y_bin: 1.0
+  quantile_low: 0.12
+  qc_min_pts: 10
+  inflate_xy: 0.20
+  inflate_z: 0.20
+  extra_remove_3d_labels: []   # If it is empty, all annotation classes in the gate chamber will be removed by default
+
+wl_transformer:
+  add_info_training_path: trout_add_info/add_info_training.txt
+  out_dir: wl_transformer
+  model: 
+    d_model: 64
+    nhead: 4
+    layers: 2
+    ffn: 128
+    dropout: 0.0
+
+  train: 
+    epochs: 1
+    batch: 60
+    lr: 1e-3
+    wd: 0.0
+    seed: 42
+
+geometry:
+  chamber_x_range: [39.7, 62.7]
+  chamber_y_range: [0, 102.4]
+  
+# ===== for evaluation (strict timestamp sorting & structure consistent with training) =====
+eval:
+  add_info_testing_path: trout_add_info/add_info_testing.txt
+  model_path: outputs/wl_transformer/model.pth
+  fused_det3d_path: outputs/det3d/fused.det3d.json
+
+  out_dir: outputs/wl_transformer/eval
+
+  ablation:
+    use_point_removal: true   # Remove the point cloud with the detection box
+    use_kalman: true          # Whether to enable Kalman
+
+  # KF observation noise (constant base value)
+  kalman_obs_noise: 0.10
+  dyn_obs:
+    base: 0.10
+
+  # If the time difference between two adjacent frames exceeds this threshold, it will be reset (in seconds)
+  prev_gap_sec: 10.0
+
+  kalman:
+    history_len: 0          # 0= Infinite memory; >0= Only record the most recent N frames
+    q_pos: 1.0e-4
+    q_vel: 1.0e-6
+    init_mode: use_obs      # use_obs | use_last | use_default
+    default_value: 0.0
+    pos_var0: 0.05
+    vel_var0: 0.01
+    warmup_frames: 0

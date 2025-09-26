@@ -1,0 +1,6 @@
+===== Test Metrics =====
+count: 2000
+MAE: 0.0261
+RMSE: 0.0337
+Bias: -0.0008
+Corr: 0.9336
