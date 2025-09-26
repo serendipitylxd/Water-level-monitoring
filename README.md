@@ -59,7 +59,7 @@ Main contributions:
 
 
 If you want to implement 3D detection on your own computer and obtain the final detection result, you need to install the PCDet_trout environment. Please refer to the [PCDet_trout_github](https://github.com/serendipitylxd/Hydro3DNet) installation method.
-Of course, we have also provided ready-made 3D detection results in the outputs/det3d file,so you don't have to install the pcdet environment.
+Of course, we have also provided ready-made 3D detection results in the outputs/det3d file,so you don't have to install the PCDet_trout environment.
 
 1. Create a new conda environment (recommended):
 
