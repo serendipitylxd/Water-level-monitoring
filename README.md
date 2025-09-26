@@ -96,7 +96,7 @@ The checkpoint of the 3D model needs to be downloaded and placed in the correspo
 
 [voxel_mamba_trout_142M](https://drive.google.com/file/d/1j6-VIsT_YAJLACLVLMxmxSK5cilgEnfV/view?usp=sharing)
 ```
-No-stop-lines
+Water-level-monitoring
 ├── pcdet_models
 │   ├── checkpoint
 │   │   │── dsvt_voxel.pth
@@ -117,7 +117,7 @@ Before running, you need to download [PCDet_TROUT_data](https://drive.google.com
 
 2. 3D detection results (optional)
 
-If you already have precomputed fused JSONs, place them in the dataset root (e.g. fused.det3d.json) and set the path in your config.
+The relevant json for 3D object detection has been pre-calculated and saved, and placed in the path outputs/det3d folder.
 
 If you want to run OpenPCDet inference to generate 3D detection results, use:
 
