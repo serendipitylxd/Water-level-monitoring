@@ -41,10 +41,10 @@ geometry:
 # ===== for evaluation (strict timestamp sorting & structure consistent with training) =====
 eval:
   add_info_testing_path: trout_add_info/add_info_testing.txt
-  model_path: outputs/wl_rwkv/model.pth            
+  model_path: outputs/wl_hgrn/model.pth            
   fused_det3d_path: outputs/det3d/fused.det3d.json
 
-  out_dir: outputs/wl_rwkv/eval                    
+  out_dir: outputs/wl_hgrn/eval                    
 
   ablation:
     use_point_removal: true   # Remove the point cloud with the detection box

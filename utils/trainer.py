@@ -4,7 +4,7 @@ from . import models as M
 
 def build_model(kind: str, model_cfg: dict):
     """
-    A shared model factory for training and evaluation.
+    训练 & 评估共用的模型工厂。
     kind in {"transformer","retnet","mamba","rwkv","hyena","mega","hgrn"}。
     """
     if kind == "transformer":

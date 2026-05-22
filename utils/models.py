@@ -137,7 +137,7 @@ class MambaWL(nn.Module):
             h = h.mean(dim=1)
         return self.head(h).squeeze(-1)
 
-# -------- RWKV (GRU fallback) --------
+# -------- RWKV（GRU 回退） --------
 class RWKVBackbone(nn.Module):
     def __init__(self, d_model: int, layers: int, n_head: int = 4, dropout: float = 0.0):
         super().__init__()
@@ -145,7 +145,7 @@ class RWKVBackbone(nn.Module):
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.rwkv_stack = None
         try:
-            from rwkv.model import RWKV  # may vary by version
+            from rwkv.model import RWKV  
             self.rwkv_stack = nn.ModuleList([RWKV(
                 model_type="RWKV-4", n_layer=1, n_embd=d_model, n_head=n_head
             ) for _ in range(layers)])
@@ -185,8 +185,8 @@ class RWKVWL(nn.Module):
 
 # -------- Hyena --------
 class _HyenaOpFallback(nn.Module):
-    """Lightweight Hyena-style operator: Conv1d + GLU approximation.
-       Ref: https://github.com/Suro-One/Hyena-Hierarchy"""
+    """轻量 Hyena 风格算子：Conv1d + GLU 近似。    
+       参考: https://github.com/Suro-One/Hyena-Hierarchy"""
     def __init__(self, d_model: int, hidden_mult: int = 2, kernel_size: int = 7, dilation: int = 1, dropout: float = 0.0):
         super().__init__()
         pad = (kernel_size - 1) // 2 * dilation
@@ -209,7 +209,7 @@ class _HyenaOpFallback(nn.Module):
 class HyenaBlock(nn.Module):
     def __init__(self, d_model: int, dropout: float = 0.0):
         super().__init__()
-        # Use local fallback directly; do not attempt the official implementation
+        
         self.norm1 = nn.LayerNorm(d_model)
         self.hyena = _HyenaOpFallback(d_model, dropout=dropout)
         self.drop  = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
@@ -247,7 +247,7 @@ class HyenaWL(nn.Module):
 class MEGAWL(nn.Module):
     """
     MEGA for Water Level Estimation
-    Ref: https://github.com/facebookresearch/mega
+    参考: https://github.com/facebookresearch/mega
     """
     def __init__(self, in_dim=2, d_model=128, nhead=4, num_layers=4, dropout=0.1, ffn=256):
         super().__init__()
@@ -274,16 +274,16 @@ class MEGAWL(nn.Module):
 # -------- HGRN (local) --------
 class HGRNCell(nn.Module):
     """
-    Gated unit with per-feature diagonal recurrence (local implementation):
-    s_t = sigma(g_z) ⊙ s_{t-1} + (1 - sigma(g_z)) ⊙ tanh(W x_t + sigma(g_r) ⊙ (u ⊙ s_{t-1}))
-    where u is a learnable diagonal (per-channel) recurrent weight.
-    Ref: https://github.com/OpenNLPLab/HGRN
+    逐特征对角递归的门控单元（本地实现）：
+    s_t = sigma(g_z) ⊙ s_{t-1} + (1 - sigma(g_z)) ⊙ tanh(Wx_t + sigma(g_r) ⊙ (u ⊙ s_{t-1}))
+    其中 u 是可学习的对角（逐通道）递归权。
+    参考: https://github.com/OpenNLPLab/HGRN
     """
     def __init__(self, d_model: int, dropout: float = 0.0):
         super().__init__()
         self.d_model = d_model
-        self.u = nn.Parameter(torch.zeros(d_model))       # diagonal recurrent weight
-        self.in_proj = nn.Linear(d_model, 3*d_model)      # [candidate, g_z, g_r]
+        self.u = nn.Parameter(torch.zeros(d_model))       
+        self.in_proj = nn.Linear(d_model, 3*d_model)      # [cand, g_z, g_r]
         self.drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.norm = nn.LayerNorm(d_model)
 
@@ -326,7 +326,7 @@ class HGRNBlock(nn.Module):
 
     def forward(self, x):
         h = self.norm1(x)
-        y = self.core(h) + self.loc(h)   # global memory + local convolution
+        y = self.core(h) + self.loc(h)   
         x = x + self.drop(y)
         y = self.mlp(self.norm2(x))
         x = x + self.drop(y)
@@ -350,3 +350,288 @@ class HGRNWL(nn.Module):
             h = h.mean(dim=1)
         return self.head(h).squeeze(-1)
 
+
+# ================================================================
+# Simple baselines for ablation study
+# Category:
+#   1) Linear baseline: Linear Regression / Ridge Regression
+#   2) Classical ML: SVR / Random Forest / XGBoost
+#   3) Lightweight NN: MLP / 1D-CNN
+#
+# These baselines are added for low-dimensional wall-profile inputs.
+# The PyTorch models keep the same forward interface as the existing
+# sequence models: forward(seq, key_padding_mask=None), where
+# seq: [N, T, C], usually [batch_size, num_sections, 2].
+# ================================================================
+
+
+def _flatten_wall_profile(seq, key_padding_mask=None, num_sections: int = 200):
+    """
+    Convert wall-profile sequence to a fixed-length vector.
+
+    Args:
+        seq: Tensor with shape [N, T, C] or [T, C].
+        key_padding_mask: Optional bool Tensor with shape [N, T].
+                          True means invalid / padded section.
+        num_sections: Fixed number of sections used by linear/MLP baselines.
+
+    Returns:
+        x: Tensor with shape [N, num_sections * C].
+
+    Notes:
+        - If T < num_sections, zero padding is applied.
+        - If T > num_sections, the sequence is truncated.
+        - Invalid sections indicated by key_padding_mask are set to zero.
+    """
+    if seq.dim() == 2:
+        seq = seq.unsqueeze(0)
+
+    if seq.dim() != 3:
+        raise ValueError(f"Expected seq with shape [N, T, C] or [T, C], but got {tuple(seq.shape)}")
+
+    N, T, C = seq.shape
+    x = seq
+
+    if key_padding_mask is not None:
+        if key_padding_mask.dim() == 1:
+            key_padding_mask = key_padding_mask.unsqueeze(0)
+        if key_padding_mask.shape[:2] != (N, T):
+            raise ValueError(
+                f"key_padding_mask should have shape [N, T] = [{N}, {T}], "
+                f"but got {tuple(key_padding_mask.shape)}"
+            )
+        valid = (~key_padding_mask).to(dtype=x.dtype, device=x.device).unsqueeze(-1)
+        x = x * valid
+
+    if T < num_sections:
+        pad = torch.zeros(N, num_sections - T, C, dtype=x.dtype, device=x.device)
+        x = torch.cat([x, pad], dim=1)
+    elif T > num_sections:
+        x = x[:, :num_sections, :]
+
+    return x.reshape(N, num_sections * C)
+
+
+class LinearRegressionWL(nn.Module):
+    """
+    Linear regression baseline for water-level estimation.
+
+    This model directly maps the flattened wall-profile vector Z in R^(B*in_dim)
+    to one scalar water-level value. It is intended as the simplest baseline for
+    verifying whether a linear mapping is sufficient.
+    """
+    def __init__(self, in_dim: int = 2, num_sections: int = 200, bias: bool = True):
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_sections = num_sections
+        self.regressor = nn.Linear(num_sections * in_dim, 1, bias=bias)
+
+    def forward(self, seq, key_padding_mask=None):
+        x = _flatten_wall_profile(seq, key_padding_mask, self.num_sections)
+        return self.regressor(x).squeeze(-1)
+
+
+class RidgeRegressionWL(LinearRegressionWL):
+    """
+    Ridge regression baseline implemented as a linear model.
+
+    In a PyTorch training loop, ridge regression can be realized by either:
+      1) setting optimizer weight_decay, or
+      2) adding model.regularization_loss() to the task loss.
+
+    Example:
+        loss = mse_loss(pred, target) + model.regularization_loss()
+    """
+    def __init__(self, in_dim: int = 2, num_sections: int = 200,
+                 ridge_alpha: float = 1e-4, bias: bool = True):
+        super().__init__(in_dim=in_dim, num_sections=num_sections, bias=bias)
+        self.ridge_alpha = ridge_alpha
+
+    def regularization_loss(self):
+        weight = self.regressor.weight
+        return self.ridge_alpha * torch.sum(weight ** 2)
+
+
+class MLPWL(nn.Module):
+    """
+    Lightweight MLP baseline.
+
+    The input wall-profile sequence is flattened into a compact vector and then
+    regressed by fully connected layers. This baseline tests whether nonlinear
+    regression without explicit attention/SSM modules is sufficient.
+    """
+    def __init__(self, in_dim: int = 2, num_sections: int = 200,
+                 hidden_dims=(128, 64), dropout: float = 0.0):
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_sections = num_sections
+
+        dims = [num_sections * in_dim] + list(hidden_dims)
+        layers = []
+        for i in range(len(dims) - 1):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+            layers.append(nn.GELU())
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+        layers.append(nn.Linear(dims[-1], 1))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, seq, key_padding_mask=None):
+        x = _flatten_wall_profile(seq, key_padding_mask, self.num_sections)
+        return self.net(x).squeeze(-1)
+
+
+class CNN1DWL(nn.Module):
+    """
+    Lightweight 1D-CNN baseline.
+
+    This model applies Conv1d along the wall-belt section dimension. Compared
+    with MLP, it explicitly models local spatial correlations between adjacent
+    wall-profile sections while remaining much simpler than Transformer/Mamba.
+    """
+    def __init__(self, in_dim: int = 2, channels=(32, 64), kernel_size: int = 5,
+                 dropout: float = 0.0, head_hidden: int = 64):
+        super().__init__()
+        padding = (kernel_size - 1) // 2
+        conv_layers = []
+        c_in = in_dim
+        for c_out in channels:
+            conv_layers.append(nn.Conv1d(c_in, c_out, kernel_size=kernel_size,
+                                         padding=padding, bias=True))
+            conv_layers.append(nn.BatchNorm1d(c_out))
+            conv_layers.append(nn.GELU())
+            if dropout > 0:
+                conv_layers.append(nn.Dropout(dropout))
+            c_in = c_out
+        self.conv = nn.Sequential(*conv_layers)
+        self.head = nn.Sequential(
+            nn.Linear(c_in, head_hidden),
+            nn.GELU(),
+            nn.Dropout(dropout) if dropout > 0 else nn.Identity(),
+            nn.Linear(head_hidden, 1)
+        )
+
+    def forward(self, seq, key_padding_mask=None):
+        if seq.dim() == 2:
+            seq = seq.unsqueeze(0)
+        if seq.dim() != 3:
+            raise ValueError(f"Expected seq with shape [N, T, C] or [T, C], but got {tuple(seq.shape)}")
+
+        x = seq
+        if key_padding_mask is not None:
+            if key_padding_mask.dim() == 1:
+                key_padding_mask = key_padding_mask.unsqueeze(0)
+            valid = (~key_padding_mask).to(dtype=x.dtype, device=x.device).unsqueeze(-1)
+            x = x * valid
+
+        # [N, T, C] -> [N, C, T]
+        h = self.conv(x.transpose(1, 2).contiguous())
+
+        # Masked global average pooling along section dimension.
+        if key_padding_mask is not None:
+            valid = (~key_padding_mask).to(dtype=h.dtype, device=h.device).unsqueeze(1)  # [N,1,T]
+            h = (h * valid).sum(dim=-1) / (valid.sum(dim=-1) + 1e-6)
+        else:
+            h = h.mean(dim=-1)
+
+        return self.head(h).squeeze(-1)
+
+
+# ---------------- Classical ML baselines: sklearn-style wrappers ----------------
+class _SKLearnWallProfileRegressor:
+    """
+    Base wrapper for classical machine-learning regressors.
+
+    These models are not nn.Module and should be trained with fit()/predict(),
+    not with a PyTorch optimizer. They are useful for ablation tables requested
+    by reviewers, including SVR, Random Forest, and XGBoost.
+    """
+    def __init__(self, estimator, in_dim: int = 2, num_sections: int = 200):
+        self.estimator = estimator
+        self.in_dim = in_dim
+        self.num_sections = num_sections
+
+    def _to_numpy_features(self, seq, key_padding_mask=None):
+        if not torch.is_tensor(seq):
+            seq = torch.as_tensor(seq, dtype=torch.float32)
+        if key_padding_mask is not None and not torch.is_tensor(key_padding_mask):
+            key_padding_mask = torch.as_tensor(key_padding_mask, dtype=torch.bool)
+        with torch.no_grad():
+            x = _flatten_wall_profile(seq, key_padding_mask, self.num_sections)
+        return x.detach().cpu().numpy()
+
+    def fit(self, seq, target, key_padding_mask=None):
+        x = self._to_numpy_features(seq, key_padding_mask)
+        if torch.is_tensor(target):
+            y = target.detach().cpu().numpy()
+        else:
+            y = target
+        self.estimator.fit(x, y)
+        return self
+
+    def predict(self, seq, key_padding_mask=None):
+        x = self._to_numpy_features(seq, key_padding_mask)
+        return self.estimator.predict(x)
+
+    def score(self, seq, target, key_padding_mask=None):
+        x = self._to_numpy_features(seq, key_padding_mask)
+        if torch.is_tensor(target):
+            y = target.detach().cpu().numpy()
+        else:
+            y = target
+        return self.estimator.score(x, y)
+
+
+class SVRWL(_SKLearnWallProfileRegressor):
+    """Support Vector Regression baseline."""
+    def __init__(self, in_dim: int = 2, num_sections: int = 200,
+                 kernel: str = "rbf", C: float = 10.0, epsilon: float = 0.01, **kwargs):
+        try:
+            from sklearn.svm import SVR
+        except Exception as e:
+            raise ImportError("SVRWL requires scikit-learn. Install with: pip install scikit-learn") from e
+        estimator = SVR(kernel=kernel, C=C, epsilon=epsilon, **kwargs)
+        super().__init__(estimator=estimator, in_dim=in_dim, num_sections=num_sections)
+
+
+class RandomForestWL(_SKLearnWallProfileRegressor):
+    """Random Forest regression baseline."""
+    def __init__(self, in_dim: int = 2, num_sections: int = 200,
+                 n_estimators: int = 300, max_depth=None, random_state: int = 42,
+                 n_jobs: int = -1, **kwargs):
+        try:
+            from sklearn.ensemble import RandomForestRegressor
+        except Exception as e:
+            raise ImportError("RandomForestWL requires scikit-learn. Install with: pip install scikit-learn") from e
+        estimator = RandomForestRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            random_state=random_state,
+            n_jobs=n_jobs,
+            **kwargs
+        )
+        super().__init__(estimator=estimator, in_dim=in_dim, num_sections=num_sections)
+
+
+class XGBoostWL(_SKLearnWallProfileRegressor):
+    """XGBoost regression baseline."""
+    def __init__(self, in_dim: int = 2, num_sections: int = 200,
+                 n_estimators: int = 500, max_depth: int = 4,
+                 learning_rate: float = 0.03, subsample: float = 0.9,
+                 colsample_bytree: float = 0.9, random_state: int = 42,
+                 objective: str = "reg:squarederror", **kwargs):
+        try:
+            from xgboost import XGBRegressor
+        except Exception as e:
+            raise ImportError("XGBoostWL requires xgboost. Install with: pip install xgboost") from e
+        estimator = XGBRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            subsample=subsample,
+            colsample_bytree=colsample_bytree,
+            random_state=random_state,
+            objective=objective,
+            **kwargs
+        )
+        super().__init__(estimator=estimator, in_dim=in_dim, num_sections=num_sections)

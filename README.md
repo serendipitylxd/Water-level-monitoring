@@ -18,6 +18,7 @@ It is based on our research on centimeter-level water level estimation in the Sh
 
 ## Changelog
 [2025-09-26] `Water-level-monitoring` v0.1.0 is released. 
+[2026-05-22] `Water-level-monitoring` v0.2.0 is released. 
 
 
 ## Introduction
@@ -26,7 +27,7 @@ This project provides a unified deep learning framework for non-contact water le
 
 Main contributions:
 - ✅ **Wall-band point cloud extraction**: Removes ships and lock gates with 3D detection and constructs water-band sequences along chamber walls. 
-- ✅ **Deep temporal regression**: Supports multiple backbone models (Transformer, RetNet, Mamba, RWKV, Hyena, MEGA, HGRN). 
+- ✅ **Deep temporal regression**: Supports multiple backbone models. 
 - ✅ **Spatial-temporal filtering**: Combines bounding-box–based point removal and online Kalman filtering for robust estimation. 
 - ✅ **Evaluation pipeline**: Centimeter-level MAE and RMSE on real-world TROUT dataset. 
 
@@ -47,13 +48,11 @@ Main contributions:
 
 |                                             |  MAE(cm) | RMSE(cm)  | Bias(cm) | Corr  |
 |---------------------------------------------|:-------:|:---------:|:-------:|:-------:|
-| wl_hrgn | 1.77 | 2.27| 0.08 | 0.9698 |
-| wl_hyena | 2.37 | 3.09 | 0.06 | 0.9452 |
-| wl_mamba | 1.93 | 2.49 | -0.01 | 0.9638 |
-| wl_mega | 2.64 | 3.47 | 0.21 | 0.9297 |
-| wl_retnet | 2.34 | 3.04 | -0.14 | 0.9468 |
-| wl_hyena | 2.08 | 2.72 | -0.21 | 0.9568 |
-| wl_hyena | 1.98 | 2.57 | -0.19 | 0.9652 |
+| wl_hrgn | 1.77 | 2.27| 0.08 | 96.98 |
+| wl_linear_regression | 19.35 | 28.37 | 12.46 | 37.14 |
+| wl_random_forest | 1.39 | 1.83 | 0.04 | 98.06 |
+| wl_mlp | 2.28 | 2.96 | 0.00 | 94.86 |
+
 
 ## Installation
 
@@ -172,5 +171,3 @@ If you find this project useful in your research, please consider cite:
 
 ## Contribution
 Welcome to be a member of the `TROUT` development team by contributing to this repo, and feel free to contact us for any potential contributions. 
-
-

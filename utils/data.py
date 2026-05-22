@@ -6,9 +6,9 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-# ---------- Point cloud and add_info ----------
+# ---------- 点云与 add_info ----------
 def load_points_any(path_no_ext: str) -> np.ndarray:
-    """Try .bin then .npy. Return xyz float32 [N,3] (allow .bin with intensity column)."""
+    """Try .bin then .npy. Return xyz float32 [N,3] (允许 .bin 带强度列)."""
     p_bin = path_no_ext + ".bin"
     p_npy = path_no_ext + ".npy"
     if os.path.isfile(p_bin):
@@ -29,7 +29,7 @@ def load_points_any(path_no_ext: str) -> np.ndarray:
         raise FileNotFoundError(f"No point file found for: {path_no_ext} (.bin/.npy)")
 
 def parse_add_info(path: str) -> Dict[str, float]:
-    """Parse format: <frame_id> <timestamp> <waterlevel> [period] -> {fid: waterlevel}"""
+    """Parse: <frame_id> <timestamp> <waterlevel> [period] -> {fid: waterlevel}"""
     mp = {}
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -48,7 +48,7 @@ def parse_add_info(path: str) -> Dict[str, float]:
         raise RuntimeError(f"Parsed 0 rows from add_info: {path}")
     return mp
 
-# ---------- 3D bounding boxes and point removal ----------
+# ---------- 3D 框与点云移除 ----------
 class OBB:
     __slots__ = ("cx","cy","cz","dx","dy","dz","yaw","label")
     def __init__(self, cx, cy, cz, dx, dy, dz, yaw, label):
@@ -93,7 +93,7 @@ def points_in_obb_mask(xyz: np.ndarray, boxes: List[OBB],
         mask |= inside
     return mask
 
-# ---------- Wall-band sequence feature extraction ----------
+# ---------- 墙带序列特征 ----------
 def extract_wall_sequence(xyz: np.ndarray,
                           x_min: float, x_max: float,
                           y_min: float, y_max: float,
@@ -105,40 +105,38 @@ def extract_wall_sequence(xyz: np.ndarray,
     Return:
       seq:  [B, 2]  per bin [z_left_q, z_right_q] (0 if invalid)
       mask: [B]     True if this bin is PAD (invalid)
-
-    Notes:
-      - If a bin has too few points (or no points on either wall) → mark as PAD;
-      - Neighbor filling: only performed if at least one neighbor is valid;
-        if all neighbors are invalid, keep as PAD;
-      - Do not use np.nanmean to avoid 'Mean of empty slice' warnings.
+    说明：
+      - 当某个 bin 没有足够点（或左右墙都没有点）→ 记为 PAD；
+      - 邻域填补：仅当“至少有一个邻居有效”时才做列均值；若邻居也全无效，则保持 PAD；
+      - 不使用 np.nanmean，避免 'Mean of empty slice' 警告。
     """
     import math
 
-    # Compute binning along y-axis
+    # 计算 y 向分箱
     span_y = max(1e-6, float(y_max - y_min))
     bins = int(math.ceil(span_y / float(y_bin_len)))
     bins = max(1, bins)
     edges = np.linspace(y_min, y_max, bins + 1, dtype=np.float32)
 
-    # Initialize
+    # 初始化
     seq = np.full((bins, 2), np.nan, dtype=np.float32)
-    mask = np.ones((bins,), dtype=bool)  # True means currently invalid (PAD)
+    mask = np.ones((bins,), dtype=bool)  # True 表示该 bin 目前无效（PAD）
 
-    # Empty point cloud → return directly
+    # 空点云直接返回
     if xyz.shape[0] == 0:
         return np.nan_to_num(seq, nan=0.0), mask
 
-    # Restrict to ROI (lock chamber)
+    # 限定闸室 ROI
     m_roi = (xyz[:, 0] >= x_min) & (xyz[:, 0] <= x_max) & (xyz[:, 1] >= y_min) & (xyz[:, 1] <= y_max)
     P = xyz[m_roi]
     if P.shape[0] == 0:
         return np.nan_to_num(seq, nan=0.0), mask
 
-    # Wall bands (left & right)
+    # 墙带（左右）
     L = P[np.abs(P[:, 0] - x_min) <= wall_band_x_half]
     R = P[np.abs(P[:, 0] - x_max) <= wall_band_x_half]
 
-    # Per-bin quantile (valid only if enough points)
+    # 每个 bin 取分位数（足够点数才算有效）
     for i in range(bins):
         yl, yr = float(edges[i]), float(edges[i + 1])
 
@@ -152,11 +150,11 @@ def extract_wall_sequence(xyz: np.ndarray,
             if zR.size >= qc_min_pts:
                 seq[i, 1] = np.quantile(zR, q_low)
 
-        # If at least one side is valid → not PAD
+        # 只要左右有一个是有效的，就不是 PAD
         if np.isfinite(seq[i, 0]) or np.isfinite(seq[i, 1]):
             mask[i] = False
 
-    # --- Neighbor filling (only if neighbors exist and at least one column has valid value) ---
+    # --- 邻域填补（仅当邻居存在且有“至少一列”有有效值时才做） ---
     for i in range(bins):
         if mask[i]:
             neigh = []
@@ -166,8 +164,8 @@ def extract_wall_sequence(xyz: np.ndarray,
                 neigh.append(seq[i + 1])
 
             if len(neigh) > 0:
-                arr = np.stack(neigh, axis=0)  # [K,2] with K>=1
-                # Column-wise mean of valid values (avoid nanmean)
+                arr = np.stack(neigh, axis=0)  # [K,2] 且 K>=1
+                # 按列做“有效值均值”（避免 nanmean）
                 m = np.empty((2,), dtype=np.float32)
                 any_valid_col = False
                 for j in range(2):
@@ -177,18 +175,18 @@ def extract_wall_sequence(xyz: np.ndarray,
                         m[j] = float(col[finite].mean())
                         any_valid_col = True
                     else:
-                        m[j] = np.nan  # this column still invalid
+                        m[j] = np.nan  # 该列仍无效
 
                 if not any_valid_col:
-                    # Both columns invalid → keep PAD
+                    # 两列都无有效值 → 继续保持 PAD，不写入
                     continue
 
-                # At least one column valid: fill NaN columns with 0 and mark as valid
+                # 至少一列有效：把 NaN 列按 0 回填，标记为有效
                 m = np.where(np.isfinite(m), m, 0.0).astype(np.float32)
                 seq[i] = m
-                mask[i] = False  # this bin becomes valid
+                mask[i] = False  # 这个 bin 变为有效
 
-    # Final output: replace NaN with 0 for model; mask still indicates PAD
+    # 输出给模型：把 NaN 转 0；mask 仍指示哪些位置是 pad
     seq = np.nan_to_num(seq, nan=0.0).astype(np.float32)
     return seq, mask
 

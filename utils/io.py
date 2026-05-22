@@ -18,11 +18,11 @@ def ensure_dir(d: str):
 
 def resolve_path(cfg_dir: str, p: Optional[str]) -> Optional[str]:
     """
-    Path resolution priority:
-    1) Absolute path
-    2) Relative to the config.yaml directory
-    3) Relative to the repository root (parent of config directory)
-    4) Relative to the current working directory (CWD)
+    解析路径优先级：
+    1) 绝对路径
+    2) 相对 config.yaml 目录
+    3) 相对仓库根目录（config 上一级）
+    4) 相对当前工作目录（CWD）
     """
     if p is None:
         return None

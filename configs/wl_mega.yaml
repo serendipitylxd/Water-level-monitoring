@@ -43,10 +43,10 @@ geometry:
 # If it is empty, all annotation classes in the gate chamber will be removed by default
 eval:
   add_info_testing_path: trout_add_info/add_info_testing.txt
-  model_path: outputs/wl_transformer/model.pth
+  model_path: outputs/wl_mega/model.pth
   fused_det3d_path: outputs/det3d/fused.det3d.json
 
-  out_dir: outputs/wl_transformer/eval
+  out_dir: outputs/wl_mega/eval
 
   ablation:
     use_point_removal: true   # Remove the point cloud with the detection box

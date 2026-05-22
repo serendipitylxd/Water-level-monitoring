@@ -7,15 +7,15 @@ import datetime as dt
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from .io import ensure_dir, resolve_path, load_yaml  
-from .data import extract_wall_sequence             
-from .metrics import eval_metrics                   
-from .trainer import build_model                    
+from .io import ensure_dir, resolve_path, load_yaml  # 你已有这些
+from .data import extract_wall_sequence             # 直接复用训练侧实现  :contentReference[oaicite:6]{index=6}
+from .metrics import eval_metrics                   # 复用  :contentReference[oaicite:7]{index=7}
+from .trainer import build_model                    # 直接调用，不重复写  :contentReference[oaicite:8]{index=8}
 
 
-# ---------- Strict add_info timestamp parsing ----------
+# ---------- 严格解析 add_info 时间戳（与各 eval_wl_*.py 一致） ----------
 def _parse_ts_str(ts: str) -> Optional[float]:
-    """YYYY_MM_DD_HH_MM_SS[_micro] -> Unix seconds; return None if failed"""
+    """YYYY_MM_DD_HH_MM_SS[_micro] -> Unix 秒；失败返回 None"""
     try:
         parts = re.split(r"[^\d]+", ts.strip())
         nums = [int(x) for x in parts if x != ""]
@@ -32,8 +32,7 @@ def _parse_ts_str(ts: str) -> Optional[float]:
 def parse_add_info_strict(path: str) -> Dict[str, Tuple[float, float, str]]:
     """
     <frame_id> <timestamp> <waterlevel> [period]
-    Returns {fid: (wl, tsec (strict non-None), ts_raw)};
-    if any line fails to parse → raise
+    返回 {fid: (wl, tsec(严格非None), ts_raw)}；若任一行解析失败直接 raise
     """
     mp = {}
     bad = []
@@ -60,10 +59,10 @@ def parse_add_info_strict(path: str) -> Dict[str, Tuple[float, float, str]]:
         msg = "\n".join([f"  line#{ln}: reason={why} :: {raw}" for ln, raw, why in bad])
         raise RuntimeError(f"[STRICT TIMESTAMP] {len(bad)} rows failed to parse in {path}:\n{msg}")
     return mp
-# Behavior aligned with your existing eval_wl_transformer/retnet/rwkv/mamba strict sorting implementation.
+# 行为对齐你现有 eval_wl_transformer/retnet/rwkv/mamba 的严格排序实现。:contentReference[oaicite:9]{index=9} :contentReference[oaicite:10]{index=10} :contentReference[oaicite:11]{index=11}
 
 
-# ---------- Read 3D boxes from fused.det3d.json and perform point removal ----------
+# ---------- 从 fused.det3d.json 读取 3D 框并做点云去除 ----------
 class OBB:
     __slots__ = ("cx","cy","cz","dx","dy","dz","yaw","label")
     def __init__(self, cx, cy, cz, dx, dy, dz, yaw, label):
@@ -86,7 +85,7 @@ def load_det3d_fused_json(path: str) -> Dict[str, List[OBB]]:
             boxes.append(OBB(b[0], b[1], b[2], b[3], b[4], b[5], b[6], label))
         out[fid] = boxes
     return out
-# Equivalent implementation as in each eval_wl_*.py
+# 上述实现与各 eval_wl_*.py 等价。:contentReference[oaicite:12]{index=12}
 
 
 def points_in_obb_mask(xyz: np.ndarray, boxes: List[OBB],
@@ -110,7 +109,7 @@ def points_in_obb_mask(xyz: np.ndarray, boxes: List[OBB],
     return mask
 
 
-# ---------- Eval dataset ----------
+# ---------- Eval 数据集（与训练特征一致、改用 det3d 框移除） ----------
 def _num_key(s: str):
     try: return (0, int(s))
     except Exception: return (1, s)
@@ -138,14 +137,14 @@ class EvalFrames(Dataset):
         self.qc_min_pts = qc_min_pts
         self.inflate_xy = inflate_xy
         self.inflate_z = inflate_z
-        self.rm_labels = set(rm_labels) if rm_labels else None  # None=remove all
+        self.rm_labels = set(rm_labels) if rm_labels else None  # None=移除所有
         self.use_point_removal = use_point_removal
 
     def __len__(self): return len(self.frames_sorted)
 
     def __getitem__(self, idx):
         fid, tsec, ts_raw = self.frames_sorted[idx]
-        # Read point cloud: same as your eval script, support .bin/.npy where first 2–3 cols are xyz  
+        # 读点云：与你 eval 脚本一致，支持 .bin/.npy 头两三列就是 xyz  :contentReference[oaicite:13]{index=13}
         p_bin = os.path.join(self.points_dir, fid + ".bin")
         p_npy = os.path.join(self.points_dir, fid + ".npy")
         if os.path.isfile(p_bin):
@@ -195,7 +194,7 @@ def collate_eval(batch):
     return seq.float(), mask.bool(), gt.float(), fids, tsec, ts_raw
 
 
-# ---------- Online Kalman filter ----------
+# ---------- 在线卡尔曼滤波（与你现有 eval 一致） ----------
 def kf_online(times, obs, base_R, q_pos, q_vel, reset_gap,
               history_len=0, init_mode="use_obs", default_value=0.0,
               pos_var0=0.05, vel_var0=0.01, warmup_frames=0):
@@ -237,5 +236,5 @@ def kf_online(times, obs, base_R, q_pos, q_vel, reset_gap,
 
         out[i] = float(x[0,0]); age += 1
     return out
-# Equivalent behavior as in each eval_wl_*.py Kalman filter implementation.
+# 以上实现与各 eval_wl_*.py 的 KF 行为一致。:contentReference[oaicite:14]{index=14} :contentReference[oaicite:15]{index=15}
 

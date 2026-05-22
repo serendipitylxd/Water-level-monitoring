@@ -1,0 +1,19 @@
+===== EVAL (raw) =====
+count: 8000.0000
+MAE: 0.0362
+RMSE: 0.0474
+Bias: 0.0012
+Corr: 0.8610
+
+===== EVAL (kalman) =====
+count: 8000.0000
+MAE: 0.0329
+RMSE: 0.0431
+Bias: 0.0012
+Corr: 0.8876
+
+===== TIMING =====
+num_frames: 8000
+elapsed_sec: 46.9315
+fps: 170.4612
+ms_per_frame: 5.8664
