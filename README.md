@@ -18,6 +18,7 @@ It is based on our research on centimeter-level water level estimation in the Sh
 
 ## Changelog
 [2025-09-26] `Water-level-monitoring` v0.1.0 is released. 
+
 [2026-05-22] `Water-level-monitoring` v0.2.0 is released. 
 
 
