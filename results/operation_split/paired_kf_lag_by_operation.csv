@@ -1,0 +1,21 @@
+model,operation_id,num_frames,num_correlation_grid_points,primary_output_column,primary_output_lag_sec,kf_output_lag_sec,extra_kf_lag_vs_primary_sec,peak_normalized_correlation
+Linear Regression,14,310,356,pred,0.0,2.0,2.0,0.8884693164433426
+Linear Regression,15,487,486,pred,0.0,2.0,2.0,0.9180770046449779
+Linear Regression,16,382,381,pred,0.0,2.0,2.0,0.6879506516658905
+Linear Regression,17,602,601,pred,0.0,2.0,2.0,0.9256684207455924
+Linear Regression,18,397,396,pred,0.0,2.0,2.0,0.7396914407452926
+MLP,14,310,356,pred,0.0,2.0,2.0,0.9468338747637302
+MLP,15,487,486,pred,0.0,2.0,2.0,0.9800515673508506
+MLP,16,382,381,pred,0.0,2.0,2.0,0.8460826061356069
+MLP,17,602,601,pred,0.0,2.0,2.0,0.9417022722359438
+MLP,18,397,396,pred,0.0,2.0,2.0,0.9174238784151688
+Random Forest,14,310,356,pred_causal,0.0,0.0,0.0,0.999999999941893
+Random Forest,15,487,486,pred_causal,0.0,0.0,0.0,0.9999999999712512
+Random Forest,16,382,381,pred_causal,0.0,0.0,0.0,0.9999999999011042
+Random Forest,17,602,601,pred_causal,0.0,0.0,0.0,0.9999999999438968
+Random Forest,18,397,396,pred_causal,0.0,0.0,0.0,0.9999999996888269
+HGRN,14,310,356,pred,0.0,2.0,2.0,0.9788151652524486
+HGRN,15,487,486,pred,0.0,2.0,2.0,0.9642726961396195
+HGRN,16,382,381,pred,0.0,4.0,4.0,0.9455115966055716
+HGRN,17,602,601,pred,0.0,4.0,4.0,0.9741795408373356
+HGRN,18,397,396,pred,0.0,4.0,4.0,0.8970958465543692

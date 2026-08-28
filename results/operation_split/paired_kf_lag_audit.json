@@ -1,0 +1,17 @@
+{
+  "protocol": "paired primary-versus-Kalman-output lag",
+  "num_water_level_frames": 8000,
+  "num_test_frames": 2178,
+  "test_operations": [14, 15, 16, 17, 18],
+  "native_lidar_rate_hz": 10.0,
+  "retained_cadence": "approximately one retained frame every 2 s; longer gaps reflect missing scans",
+  "correlation_grid_step_sec": 2.0,
+  "max_lag_sec": 30.0,
+  "operation_boundary_reset": true,
+  "metrics_evaluated_at_original_timestamps": true,
+  "lag_definition": "Within each operation, interpolate the primary and Kalman outputs on the stated grid, mean-centre both series, and select the offset maximizing normalized cross-correlation. Positive lag denotes a delayed Kalman output.",
+  "arithmetic_identity": "extra Kalman lag = Kalman-output lag - primary-output lag",
+  "arithmetic_audit_passed": true,
+  "random_forest_primary_output_column": "pred_causal",
+  "evaluation_manifest_sha256": "5afe19307d7fa5c6fb4ddf16ce8a6778212773f7ca53f4313a6644e67d0ef869"
+}

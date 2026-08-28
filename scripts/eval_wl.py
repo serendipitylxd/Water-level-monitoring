@@ -1,6 +1,6 @@
 # scripts/eval_wl.py
 # -*- coding: utf-8 -*-
-import os, sys, argparse, json, inspect, pickle, time
+import os, sys, argparse, json, inspect, pickle, time, shutil, hashlib
 from typing import Tuple
 import numpy as np
 import torch
@@ -15,6 +15,12 @@ from utils.io import load_yaml, resolve_path, ensure_dir
 from utils.trainer import build_model as build_existing_model
 from utils import models as wl_models
 from utils.metrics import eval_metrics
+from utils.data import (
+    load_operation_manifest,
+    validate_operation_manifest,
+    ManifestWLFrames,
+    collate_manifest,
+)
 from utils.eval_utils import (
     parse_add_info_strict, load_det3d_fused_json, EvalFrames, collate_eval, kf_online
 )
@@ -214,6 +220,104 @@ def build_or_load_eval_model(kind: str, model_cfg: dict, model_path: str, device
     return model, False
 
 
+def _build_manifest_eval_dataset(
+    records,
+    geom: dict,
+    wl_cfg: dict,
+    ev_cfg: dict,
+    feature_cache_path: str = None,
+):
+    x_min, x_max = geom["chamber_x_range"]
+    y_min, y_max = geom["chamber_y_range"]
+    return ManifestWLFrames(
+        records,
+        x_min, x_max, y_min, y_max,
+        wl_cfg["wall_band_x_half"], wl_cfg["y_bin"],
+        wl_cfg["quantile_low"], wl_cfg["qc_min_pts"],
+        wl_cfg["inflate_xy"], wl_cfg["inflate_z"],
+        remove_labels=wl_cfg.get("extra_remove_3d_labels", []),
+        use_point_removal=ev_cfg.get("ablation", {}).get(
+            "use_point_removal", True
+        ),
+        feature_cache_path=feature_cache_path,
+    )
+
+
+def _kf_by_operation(
+    times: np.ndarray,
+    observations: np.ndarray,
+    operation_ids: np.ndarray,
+    **kf_kwargs,
+) -> np.ndarray:
+    """Run independent online filters and reset explicitly at each operation."""
+    output = np.full(observations.shape, np.nan, dtype=np.float64)
+    for operation_id in sorted(set(operation_ids.tolist())):
+        indices = np.flatnonzero(operation_ids == operation_id)
+        local_order = indices[np.argsort(times[indices], kind="stable")]
+        filtered = kf_online(
+            times=times[local_order].tolist(),
+            obs=observations[local_order].tolist(),
+            **kf_kwargs,
+        )
+        output[local_order] = np.asarray(filtered, dtype=np.float64)
+    return output
+
+
+def _prefixed_metrics(prefix: str, metrics: dict) -> dict:
+    return {
+        f"{prefix}_{name}": metrics.get(name)
+        for name in ("MAE", "RMSE", "Bias", "Corr")
+    }
+
+
+def _operation_metric_rows(
+    ys: np.ndarray,
+    yp: np.ndarray,
+    yp_kf: np.ndarray,
+    operation_ids: np.ndarray,
+    dates: list,
+) -> list:
+    rows = []
+    for operation_id in sorted(set(operation_ids.tolist())):
+        indices = np.flatnonzero(operation_ids == operation_id)
+        raw_metrics = eval_metrics(ys[indices], yp[indices])
+        row = {
+            "operation_id": int(operation_id),
+            "date": ",".join(sorted({str(dates[index]) for index in indices})),
+            "count": int(len(indices)),
+            **_prefixed_metrics("raw", raw_metrics),
+        }
+        if yp_kf is not None:
+            row.update(
+                _prefixed_metrics(
+                    "kalman", eval_metrics(ys[indices], yp_kf[indices])
+                )
+            )
+        rows.append(row)
+    return rows
+
+
+def _macro_operation_summary(rows: list) -> dict:
+    summary = {"num_operations": len(rows)}
+    metric_columns = [
+        key
+        for prefix in ("raw", "kalman")
+        for key in (f"{prefix}_MAE", f"{prefix}_RMSE", f"{prefix}_Bias", f"{prefix}_Corr")
+        if any(key in row for row in rows)
+    ]
+    for key in metric_columns:
+        values = np.asarray(
+            [row.get(key) for row in rows if row.get(key) is not None],
+            dtype=np.float64,
+        )
+        values = values[np.isfinite(values)]
+        summary[f"{key}_mean"] = float(values.mean()) if values.size else None
+        summary[f"{key}_std"] = (
+            float(values.std(ddof=1)) if values.size >= 2 else None
+        )
+    return summary
+
+
 # ---------------------------
 # Main evaluation flow
 # ---------------------------
@@ -233,35 +337,117 @@ def main():
     ev_cfg   = cfg.get("eval", {})
 
     # Resolve paths
-    add_te = resolve_path(cfg_dir, ev_cfg["add_info_testing_path"])
-    pts_dir = resolve_path(cfg_dir, data_cfg.get("points_testing_dir", data_cfg["points_training_dir"]))
-    det_json = resolve_path(cfg_dir, ev_cfg.get("fused_det3d_path"))
     model_path = resolve_path(cfg_dir, ev_cfg.get("model_path"))
     out_dir = resolve_path(cfg_dir, ev_cfg.get("out_dir", os.path.join("outputs", sec["out_dir"], "eval")))
     ensure_dir(out_dir)
-
-    # Read strict timestamps & sort
-    gt_map = parse_add_info_strict(add_te)  # {fid: (wl, tsec, ts_raw)}
-    frames_sorted = sorted([(fid, tsec, ts_raw) for fid, (_, tsec, ts_raw) in gt_map.items()],
-                           key=lambda x: (x[1], x[0]))
-
-    # Fused det3d boxes
-    det_boxes = load_det3d_fused_json(det_json) if det_json else {}
-
-    # Dataset / DataLoader
-    x_min, x_max = geom["chamber_x_range"]
-    y_min, y_max = geom["chamber_y_range"]
     batch = int(ev_cfg.get("batch", sec.get("train", {}).get("batch", 60)))
-    ds = EvalFrames(
-        frames_sorted, gt_map, pts_dir, det_boxes,
-        x_min, x_max, y_min, y_max,
-        wl_cfg["wall_band_x_half"], wl_cfg["y_bin"],
-        wl_cfg["quantile_low"], wl_cfg["qc_min_pts"],
-        wl_cfg["inflate_xy"], wl_cfg["inflate_z"],
-        rm_labels=wl_cfg.get("extra_remove_3d_labels", []),
-        use_point_removal=ev_cfg.get("ablation", {}).get("use_point_removal", True),
+    manifest_cfg = data_cfg.get("operation_manifest_path")
+    manifest_mode = bool(manifest_cfg)
+    split_audit = None
+    manifest_path = None
+    feature_cache_path = None
+    if manifest_mode:
+        manifest_path = resolve_path(cfg_dir, manifest_cfg)
+        all_records = load_operation_manifest(
+            manifest_path,
+            validate_paths=bool(data_cfg.get("manifest_validate_paths", True)),
+        )
+        split_audit = validate_operation_manifest(all_records)
+        test_name = str(data_cfg.get("test_split", "test"))
+        test_records = [
+            record for record in all_records if record["split"] == test_name
+        ]
+        eval_source = data_cfg.get("manifest_eval_source")
+        if eval_source:
+            test_records = [
+                record
+                for record in test_records
+                if record["source"] == str(eval_source)
+            ]
+        override_dir_cfg = data_cfg.get("manifest_points_override_dir")
+        if override_dir_cfg:
+            override_dir = resolve_path(cfg_dir, override_dir_cfg)
+            overridden_records = []
+            for original in test_records:
+                record = dict(original)
+                original_suffix = os.path.splitext(str(record["points_path"]))[1]
+                replacement = os.path.join(
+                    override_dir, str(record["frame_id"]) + original_suffix
+                )
+                if not os.path.isfile(replacement):
+                    raise FileNotFoundError(
+                        f"Missing manifest point override for {record['sample_id']}: "
+                        f"{replacement}"
+                    )
+                record["points_path"] = replacement
+                overridden_records.append(record)
+            test_records = overridden_records
+        feature_cache_cfg = data_cfg.get("feature_cache_path")
+        if feature_cache_cfg and not override_dir_cfg:
+            feature_cache_path = resolve_path(cfg_dir, feature_cache_cfg)
+        elif feature_cache_cfg and override_dir_cfg:
+            print(
+                "[feature-cache] bypassed because manifest_points_override_dir "
+                "changes the point-cloud inputs"
+            )
+        if not test_records:
+            raise RuntimeError(
+                f"Operation manifest has no records for test split {test_name!r}"
+                + (f" and source {eval_source!r}" if eval_source else "")
+            )
+        ds = _build_manifest_eval_dataset(
+            test_records,
+            geom,
+            wl_cfg,
+            ev_cfg,
+            feature_cache_path=feature_cache_path,
+        )
+        active_collate_fn = collate_manifest
+        print(
+            f"[split] test frames={len(test_records)} "
+            f"operations={sorted({r['operation_id'] for r in test_records})} "
+            f"source={eval_source or 'all'} "
+            f"annotation_types={sorted({r['annotation_type'] for r in test_records})}"
+        )
+    else:
+        print(
+            "[WARNING] No data.operation_manifest_path configured; using the "
+            "legacy frame-wise test set. Do not use this mode for revised paper results."
+        )
+        add_te = resolve_path(cfg_dir, ev_cfg["add_info_testing_path"])
+        pts_dir = resolve_path(
+            cfg_dir,
+            data_cfg.get("points_testing_dir", data_cfg["points_training_dir"]),
+        )
+        det_json = resolve_path(cfg_dir, ev_cfg.get("fused_det3d_path"))
+        gt_map = parse_add_info_strict(add_te)
+        frames_sorted = sorted(
+            [
+                (fid, tsec, ts_raw)
+                for fid, (_, tsec, ts_raw) in gt_map.items()
+            ],
+            key=lambda item: (item[1], item[0]),
+        )
+        det_boxes = load_det3d_fused_json(det_json) if det_json else {}
+        x_min, x_max = geom["chamber_x_range"]
+        y_min, y_max = geom["chamber_y_range"]
+        ds = EvalFrames(
+            frames_sorted, gt_map, pts_dir, det_boxes,
+            x_min, x_max, y_min, y_max,
+            wl_cfg["wall_band_x_half"], wl_cfg["y_bin"],
+            wl_cfg["quantile_low"], wl_cfg["qc_min_pts"],
+            wl_cfg["inflate_xy"], wl_cfg["inflate_z"],
+            rm_labels=wl_cfg.get("extra_remove_3d_labels", []),
+            use_point_removal=ev_cfg.get("ablation", {}).get(
+                "use_point_removal", True
+            ),
+        )
+        active_collate_fn = collate_eval
+    num_workers = int(ev_cfg.get("num_workers", 4))
+    dl = torch.utils.data.DataLoader(
+        ds, batch_size=batch, shuffle=False, num_workers=num_workers,
+        collate_fn=active_collate_fn, pin_memory=True
     )
-    dl = torch.utils.data.DataLoader(ds, batch_size=batch, shuffle=False, num_workers=4, collate_fn=collate_eval, pin_memory=True)
 
     # Build/load model. Torch models load state_dict from .pth; classical ML
     # baselines load the whole fitted object from pickle (.pkl or pickle-form .pth).
@@ -269,7 +455,7 @@ def main():
     model, model_is_sklearn = build_or_load_eval_model(model_kind, sec.get("model", {}), model_path, device)
 
     # Evaluation inference
-    ys_all, yp_all, fids_all, ts_all = [], [], [], []
+    ys_all, yp_all, metadata_all, ts_all = [], [], [], []
     num_eval_frames = 0
 
     # Total evaluation timing: includes DataLoader feature construction,
@@ -291,16 +477,38 @@ def main():
             file=sys.stdout,
             bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         )
-        for seq, mask, gt, fids, tsec, _ in dl:
+        for batch_data in dl:
+            if manifest_mode:
+                seq, mask, gt, metadata = batch_data
+                batch_tsec = np.asarray(
+                    [item["tsec"] for item in metadata], dtype=np.float64
+                )
+            else:
+                seq, mask, gt, fids, batch_tsec, ts_raw = batch_data
+                metadata = [
+                    {
+                        "sample_id": str(fid),
+                        "source": "legacy_test",
+                        "frame_id": str(fid),
+                        "timestamp": str(raw_timestamp),
+                        "date": "",
+                        "operation_id": -1,
+                        "tsec": float(seconds),
+                        "split": "legacy_test",
+                    }
+                    for fid, seconds, raw_timestamp in zip(
+                        fids, batch_tsec, ts_raw
+                    )
+                ]
             if model_is_sklearn:
                 pred = _predict_sklearn(model, seq, mask)
             else:
                 pred = model(seq.to(device), key_padding_mask=mask.to(device)).detach().cpu().numpy()
             ys_all.append(gt.numpy())
             yp_all.append(np.asarray(pred, dtype=np.float64).reshape(-1))
-            fids_all.extend(fids)
-            ts_all.append(tsec)
-            num_eval_frames += len(fids)
+            metadata_all.extend(metadata)
+            ts_all.append(batch_tsec)
+            num_eval_frames += len(metadata)
             pbar.update(1)
         pbar.close()
 
@@ -319,6 +527,9 @@ def main():
     ys = np.concatenate(ys_all, 0)
     yp = np.concatenate(yp_all, 0)
     tsec = np.concatenate(ts_all, 0)
+    operation_ids = np.asarray(
+        [int(item["operation_id"]) for item in metadata_all], dtype=np.int64
+    )
 
     # Metrics (raw)
     met_raw = eval_metrics(ys, yp)  # MAE/RMSE/Bias/Corr
@@ -337,17 +548,14 @@ def main():
         vel_var0    = float(ev_cfg.get("kalman", {}).get("vel_var0", 0.01))
         warmup      = int(ev_cfg.get("kalman", {}).get("warmup_frames", 0))
 
-        order = np.argsort(tsec, kind="stable")
-        yp_kf = np.array(kf_online(
-            times=tsec[order].tolist(),
-            obs=yp[order].tolist(),
+        yp_kf = _kf_by_operation(
+            times=tsec,
+            observations=yp,
+            operation_ids=operation_ids,
             base_R=base_R, q_pos=q_pos, q_vel=q_vel, reset_gap=reset_gap,
             history_len=history_len, init_mode=init_mode, default_value=default_val,
             pos_var0=pos_var0, vel_var0=vel_var0, warmup_frames=warmup
-        ), dtype=np.float64)
-        inv = np.empty_like(order)
-        inv[order] = np.arange(len(order))
-        yp_kf = yp_kf[inv]
+        )
         met_kf = eval_metrics(ys, yp_kf)
     else:
         yp_kf = None
@@ -356,7 +564,12 @@ def main():
     # Output CSV
     import pandas as pd
     df = pd.DataFrame({
-        "fid": fids_all,
+        "sample_id": [item["sample_id"] for item in metadata_all],
+        "source": [item["source"] for item in metadata_all],
+        "fid": [item["frame_id"] for item in metadata_all],
+        "operation_id": operation_ids,
+        "date": [item["date"] for item in metadata_all],
+        "timestamp": [item["timestamp"] for item in metadata_all],
         "tsec": tsec,
         "gt": ys,
         "pred": yp,
@@ -364,6 +577,57 @@ def main():
     })
     csv_path = os.path.join(out_dir, "predictions.csv")
     df.to_csv(csv_path, index=False)
+
+    operation_metrics_path = None
+    operation_summary_path = None
+    if manifest_mode:
+        operation_rows = _operation_metric_rows(
+            ys, yp, yp_kf, operation_ids,
+            [item["date"] for item in metadata_all],
+        )
+        operation_metrics_path = os.path.join(
+            out_dir, "per_operation_metrics.csv"
+        )
+        pd.DataFrame(operation_rows).to_csv(operation_metrics_path, index=False)
+        operation_summary = {
+            "protocol": "operation-wise",
+            "test_operations": sorted(set(operation_ids.tolist())),
+            "micro_raw": met_raw,
+            "micro_kalman": met_kf,
+            "macro_across_operations": _macro_operation_summary(operation_rows),
+        }
+        operation_summary_path = os.path.join(
+            out_dir, "operation_summary.json"
+        )
+        with open(operation_summary_path, "w", encoding="utf-8") as handle:
+            json.dump(operation_summary, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+
+        copied_manifest = os.path.join(out_dir, "split_manifest.csv")
+        if os.path.abspath(manifest_path) != os.path.abspath(copied_manifest):
+            shutil.copy2(manifest_path, copied_manifest)
+        with open(manifest_path, "rb") as handle:
+            manifest_sha256 = hashlib.sha256(handle.read()).hexdigest()
+        audit_path = os.path.join(out_dir, "split_audit.json")
+        with open(audit_path, "w", encoding="utf-8") as handle:
+            audit_payload = {
+                "manifest_path": os.path.abspath(manifest_path),
+                "manifest_sha256": manifest_sha256,
+                "audit": split_audit,
+            }
+            if feature_cache_path:
+                with open(feature_cache_path, "rb") as cache_handle:
+                    audit_payload["feature_cache"] = {
+                        "path": os.path.abspath(feature_cache_path),
+                        "sha256": hashlib.sha256(cache_handle.read()).hexdigest(),
+                    }
+            json.dump(
+                audit_payload,
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+            handle.write("\n")
 
     # === Save eval_results(test_dataset).txt ===
     def _format_block(title: str, met: dict) -> str:
@@ -403,6 +667,10 @@ def main():
         print("[EVAL] kf :", {k: (None if v is None else round(v, 6)) for k, v in met_kf.items()})
     print(f"[done] saved: {csv_path}")
     print(f"[done] saved: {results_txt_path}")
+    if operation_metrics_path:
+        print(f"[done] saved: {operation_metrics_path}")
+    if operation_summary_path:
+        print(f"[done] saved: {operation_summary_path}")
 
 
 if __name__ == "__main__":

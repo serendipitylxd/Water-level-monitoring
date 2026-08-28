@@ -1,0 +1,5 @@
+model,paired_operations,primary_output_lag_mean_sec,primary_output_lag_sample_sd_sec,kf_output_lag_mean_sec,kf_output_lag_sample_sd_sec,extra_kf_lag_mean_sec,extra_kf_lag_sample_sd_sec,minimum_peak_normalized_correlation
+Linear Regression,5,0.0,0.0,2.0,0.0,2.0,0.0,0.6879506516658905
+MLP,5,0.0,0.0,2.0,0.0,2.0,0.0,0.8460826061356069
+Random Forest,5,0.0,0.0,0.0,0.0,0.0,0.0,0.9999999996888269
+HGRN,5,0.0,0.0,3.2,1.0954451150103321,3.2,1.0954451150103321,0.8970958465543692

@@ -1,0 +1,7 @@
+component,basis,bound_cm
+Image interpolation,half of coarsest calibrated increment: (5 cm / 24 px) / 2,0.10416666666666667
+Reader agreement,half of the 0.5 cm two-reader acceptance threshold,0.25
+Timestamp-based video-frame matching,14.099309 cm/s times 1/120 s,0.1174942433674307
+Stored-value rounding,half of the 0.001 m stored-label increment,0.05
+Gauge-to-LiDAR-ROI separation,gauge lies inside the LiDAR-observed wall-belt ROI,0.0
+Conservative linear total,sum of quantified absolute half-widths,0.5216609100340974

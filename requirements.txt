@@ -2,6 +2,8 @@
 # Pin versions to match the project code and your current environment (Python 3.8, CUDA 11.8).
 numpy==1.23.0
 pandas==2.0.3
+scikit-learn==1.3.2
+easydict==1.13
 PyYAML==6.0.1
 tqdm==4.66.2
 torch==2.1.0           # Install the CUDA 11.8 build
@@ -18,4 +20,3 @@ rwkv==0.7.5            # Official RWKV package (used in RWKVBackbone)
 #    pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu118
 # 2) If you do NOT use certain backbones (e.g., Mamba/RWKV), you can remove the corresponding packages above.
 # 3) If your CUDA version differs, replace spconv/cuMM wheels accordingly and install matching PyTorch builds.
-

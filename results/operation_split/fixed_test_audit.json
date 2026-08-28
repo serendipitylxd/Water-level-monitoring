@@ -1,0 +1,18 @@
+{
+  "protocol": "13-model fixed operation-wise evaluation",
+  "num_models": 13,
+  "num_test_operations": 5,
+  "num_test_frames": 2178,
+  "test_operations": [14, 15, 16, 17, 18],
+  "test_date": "2024-07-19",
+  "operation_disjoint": true,
+  "held_out_test_day": true,
+  "random_forest_primary_output": "anchored Random Forest followed by the validation-selected causal first-order stabilizer",
+  "other_primary_outputs": "direct frame-wise model outputs",
+  "evaluation_manifest_sha256": "5afe19307d7fa5c6fb4ddf16ce8a6778212773f7ca53f4313a6644e67d0ef869",
+  "feature_cache_sha256": "3fa00783564cada6175e8d01b217b82011d756ac92c74e366c0032d9770fbc91",
+  "outputs": {
+    "fixed_test_overall.csv": "365978cc9a61125a7a1c11865a7f0a80783b787d30cc53b95100bbe247e19fcf",
+    "fixed_test_per_operation.csv": "01727816ece4a3863da024a0af23ccc17a948a68caca4f1a18f1fff95aa657ca"
+  }
+}

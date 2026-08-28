@@ -1,0 +1,39 @@
+{
+  "protocol": "camera-read staff-gauge operational reference",
+  "num_water_level_frames": 8000,
+  "num_operations": 18,
+  "native_lidar_rate_hz": 10.0,
+  "retained_cadence": {
+    "median_within_operation_gap_sec": 2.0000078678131104,
+    "minimum_gap_sec": 1.9996979236602783,
+    "maximum_gap_sec": 3.2000041007995605,
+    "fraction_1p95_to_2p05": 0.9299674267100977
+  },
+  "staff_gauge": {
+    "physical_graduation_cm": 5.0,
+    "camera_resolution_pixels": [1920, 1080],
+    "camera_frame_rate_hz": 60.0,
+    "calibrated_pixels_per_local_5cm_interval": [24, 27],
+    "reading_method": "interval-specific linear pixel interpolation at the waterline",
+    "annotation_platform": "CVAT",
+    "annotators": 3,
+    "annotation_rule": "two independent readings; their mean is used when the difference is at most 0.5 cm; a third annotator independently re-reads every frame exceeding 0.5 cm",
+    "third_annotator_coverage_of_triggered_frames_percent": 100.0,
+    "stored_increment_m": 0.001
+  },
+  "synchronization": {
+    "clock": "camera and LiDAR timestamps use the same network-disciplined host-computer clock",
+    "matching": "nearest 60-fps video frame to each retained LiDAR timestamp",
+    "conditional_nearest_frame_half_width_sec": 0.008333333333333333,
+    "fixed_device_latency_independently_calibrated": false
+  },
+  "spatial_relation": "the staff gauge lies on the wall belt inside the LiDAR observation region of interest",
+  "maximum_observed_abs_rate_cm_per_s": 14.099309204091684,
+  "operational_uncertainty_bound_cm": 0.52,
+  "bound_interpretation": "protocol-derived operational estimate, not a traceable calibration certificate",
+  "unquantified_terms": [
+    "fixed camera-LiDAR device latency",
+    "common-mode staff-gauge calibration error",
+    "staff-gauge installation error"
+  ]
+}

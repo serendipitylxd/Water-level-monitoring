@@ -1,0 +1,27 @@
+{
+  "protocol": "four-model leave-one-operation-out",
+  "models": [
+    "wl_linear_regression",
+    "wl_mlp",
+    "wl_random_forest",
+    "wl_hgrn"
+  ],
+  "model_epochs": {
+    "wl_linear_regression": 1,
+    "wl_mlp": 22,
+    "wl_random_forest": 1,
+    "wl_hgrn": 36
+  },
+  "num_folds_per_model": 18,
+  "total_evaluated_folds": 72,
+  "total_test_frames_per_model": 8000,
+  "all_operation_disjoint": true,
+  "hyperparameters_fixed_across_folds": true,
+  "evaluation_manifest_sha256": "5afe19307d7fa5c6fb4ddf16ce8a6778212773f7ca53f4313a6644e67d0ef869",
+  "feature_cache_sha256": "3fa00783564cada6175e8d01b217b82011d756ac92c74e366c0032d9770fbc91",
+  "outputs": {
+    "loocv_macro.csv": "dd2ede430d650b57251759704704ee328d29733a640c2fa90c38ba845484e9b6",
+    "loocv_per_operation.csv": "de101e883dbb2eae95c2eb75ce71c46ccc32866489d21d72ad1491796e9eb3bb",
+    "loocv_kf_rmse_by_operation.csv": "1fa977c411cf4ec9254ea25d6c256d1774f7b085cc5f839bcd2a30dfa4559f86"
+  }
+}

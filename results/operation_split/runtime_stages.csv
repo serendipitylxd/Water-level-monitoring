@@ -1,0 +1,11 @@
+stage,mean_ms,sample_sd_ms,p95_ms
+Point-cloud disk read,0.251891,0.028792,0.300985
+Six-detector input preparation,55.043931,3.297456,60.427247
+Six-detector inference,471.803605,44.260721,559.914224
+Detection fusion,0.966562,1.518120,1.735930
+Detected-point removal,1.271163,0.204045,1.511957
+Wall-profile feature construction,5.682345,0.577058,6.340121
+Random Forest primary estimate,25.494202,4.171228,28.255400
+Causal stabilizer,0.002141,0.000304,0.002701
+Kalman update,0.079532,0.009410,0.096685
+End to end,561.038417,46.961901,652.991230

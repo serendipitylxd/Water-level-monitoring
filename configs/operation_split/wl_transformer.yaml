@@ -1,0 +1,62 @@
+data:
+  operation_manifest_path: splits/waterlevel_test_only_8000/manifest.csv
+  feature_cache_path: outputs_operation_split/test_only_8000/feature_cache/waterlevel_test_only_default.npz
+  points_training_dir: path/to/TROUT/points
+  labels_training_dir: path/to/TROUT/labels
+  points_testing_dir: path/to/TROUT/points_test
+  train_split: train
+  val_split: val
+  test_split: test
+output:
+  root: outputs_operation_split/test_only_8000/fixed
+waterlevel:
+  wall_band_x_half: 1.0
+  y_bin: 1.0
+  quantile_low: 0.12
+  qc_min_pts: 10
+  inflate_xy: 0.2
+  inflate_z: 0.2
+  extra_remove_3d_labels: []
+wl_transformer:
+  add_info_training_path: trout_add_info/add_info_training.txt
+  out_dir: wl_transformer
+  model:
+    d_model: 64
+    nhead: 4
+    layers: 2
+    ffn: 128
+    dropout: 0.0
+  train:
+    epochs: 40
+    batch: 60
+    lr: 1e-3
+    wd: 0.0
+    seed: 42
+geometry:
+  chamber_x_range:
+  - 39.7
+  - 62.7
+  chamber_y_range:
+  - 0
+  - 102.4
+eval:
+  add_info_testing_path: trout_add_info/add_info_testing.txt
+  model_path: outputs_operation_split/test_only_8000/fixed/wl_transformer/model.pth
+  fused_det3d_path: outputs/det3d/fused.det3d.json
+  out_dir: outputs_operation_split/test_only_8000/fixed/wl_transformer/eval
+  ablation:
+    use_point_removal: true
+    use_kalman: true
+  kalman_obs_noise: 0.1
+  dyn_obs:
+    base: 0.1
+  prev_gap_sec: 10.0
+  kalman:
+    history_len: 0
+    q_pos: 0.0001
+    q_vel: 1.0e-06
+    init_mode: use_obs
+    default_value: 0.0
+    pos_var0: 0.05
+    vel_var0: 0.01
+    warmup_frames: 0

@@ -595,14 +595,40 @@ class SVRWL(_SKLearnWallProfileRegressor):
 
 
 class RandomForestWL(_SKLearnWallProfileRegressor):
-    """Random Forest regression baseline."""
+    """Random Forest regression on raw and optional robust wall statistics.
+
+    ``feature_mode='raw_stats'`` augments the flattened wall profile with
+    per-wall quantiles and short longitudinal block statistics.  The optional
+    residual anchor keeps a fixed fraction of the lowest observed wall-belt
+    height outside the forest and lets the forest learn only the remaining
+    residual.  This preserves limited extrapolation when all operations on a
+    later day occupy a lower range than the development operations; a plain
+    random forest can only average training targets in its terminal leaves.
+    """
     def __init__(self, in_dim: int = 2, num_sections: int = 200,
                  n_estimators: int = 300, max_depth=None, random_state: int = 42,
-                 n_jobs: int = -1, **kwargs):
+                 n_jobs: int = -1, feature_mode: str = "raw",
+                 residual_anchor: str = "none",
+                 residual_coefficient: float = 0.0, **kwargs):
         try:
             from sklearn.ensemble import RandomForestRegressor
         except Exception as e:
             raise ImportError("RandomForestWL requires scikit-learn. Install with: pip install scikit-learn") from e
+        if feature_mode not in {
+            "raw", "stats", "raw_stats", "relative_stats", "relative_raw_stats"
+        }:
+            raise ValueError(
+                "RandomForestWL feature_mode must be raw, stats, raw_stats, "
+                "relative_stats, or relative_raw_stats"
+            )
+        if residual_anchor not in {"none", "min_both", "left_min"}:
+            raise ValueError(
+                "RandomForestWL residual_anchor must be none, min_both, or left_min"
+            )
+        if residual_anchor == "none" and float(residual_coefficient) != 0.0:
+            raise ValueError(
+                "residual_coefficient must be zero when residual_anchor is none"
+            )
         estimator = RandomForestRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
@@ -611,6 +637,135 @@ class RandomForestWL(_SKLearnWallProfileRegressor):
             **kwargs
         )
         super().__init__(estimator=estimator, in_dim=in_dim, num_sections=num_sections)
+        self.feature_mode = str(feature_mode)
+        self.residual_anchor = str(residual_anchor)
+        self.residual_coefficient = float(residual_coefficient)
+
+    @staticmethod
+    def _as_numpy_sequence(seq, key_padding_mask=None):
+        import numpy as np
+
+        if torch.is_tensor(seq):
+            values = seq.detach().cpu().numpy().astype(np.float64, copy=True)
+        else:
+            values = np.asarray(seq, dtype=np.float64).copy()
+        if values.ndim == 2:
+            values = values[None, ...]
+        if values.ndim != 3 or values.shape[2] != 2:
+            raise ValueError(
+                "RandomForestWL expects wall profiles with shape [N,T,2], "
+                f"got {values.shape}"
+            )
+        if key_padding_mask is None:
+            mask = np.zeros(values.shape[:2], dtype=bool)
+        elif torch.is_tensor(key_padding_mask):
+            mask = key_padding_mask.detach().cpu().numpy().astype(bool, copy=False)
+        else:
+            mask = np.asarray(key_padding_mask, dtype=bool)
+        if mask.ndim == 1:
+            mask = mask[None, ...]
+        if mask.shape != values.shape[:2]:
+            raise ValueError(
+                "RandomForestWL mask shape must match [N,T]: "
+                f"mask={mask.shape}, sequence={values.shape}"
+            )
+        return values, mask
+
+    @staticmethod
+    def _nan_stat(function, values, axis=1, **kwargs):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            return function(values, axis=axis, **kwargs)
+
+    def _engineered_features(self, seq, key_padding_mask=None):
+        import numpy as np
+
+        values, mask = self._as_numpy_sequence(seq, key_padding_mask)
+        original_masked = values.copy()
+        original_masked[np.broadcast_to(mask[..., None], original_masked.shape)] = np.nan
+        left_min = np.nan_to_num(
+            self._nan_stat(np.nanmin, original_masked[:, :, 0], axis=1), nan=0.0
+        )
+        right_min = np.nan_to_num(
+            self._nan_stat(np.nanmin, original_masked[:, :, 1], axis=1), nan=0.0
+        )
+        if self.residual_anchor == "min_both":
+            anchor = np.minimum(left_min, right_min)
+        elif self.residual_anchor == "left_min":
+            anchor = left_min
+        else:
+            anchor = np.zeros(values.shape[0], dtype=np.float64)
+
+        feature_values = values.copy()
+        if self.feature_mode.startswith("relative_"):
+            feature_values = feature_values - anchor[:, None, None]
+
+        raw = feature_values.copy()
+        raw[np.broadcast_to(mask[..., None], raw.shape)] = 0.0
+        raw = raw.reshape(raw.shape[0], -1)
+
+        masked = feature_values.copy()
+        masked[np.broadcast_to(mask[..., None], masked.shape)] = np.nan
+        stats = []
+        quantiles = (0.0, 0.01, 0.02, 0.05, 0.10, 0.20, 0.50, 0.80, 0.95, 1.0)
+        for channel in range(2):
+            wall = masked[:, :, channel]
+            for quantile in quantiles:
+                statistic = self._nan_stat(
+                    np.nanquantile, wall, q=quantile, axis=1
+                )
+                stats.append(statistic)
+            stats.append(self._nan_stat(np.nanmean, wall, axis=1))
+            stats.append(self._nan_stat(np.nanstd, wall, axis=1))
+
+        for start in range(0, values.shape[1], 10):
+            end = min(values.shape[1], start + 10)
+            for channel in range(2):
+                block = masked[:, start:end, channel]
+                stats.append(self._nan_stat(np.nanmin, block, axis=1))
+                stats.append(self._nan_stat(np.nanmedian, block, axis=1))
+                stats.append(self._nan_stat(np.nanmean, block, axis=1))
+        stats.append((~mask).mean(axis=1))
+        stats = np.column_stack(stats)
+        stats = np.nan_to_num(stats, nan=0.0, posinf=0.0, neginf=0.0)
+
+        if self.feature_mode == "raw":
+            features = super()._to_numpy_features(seq, key_padding_mask)
+        elif self.feature_mode in {"stats", "relative_stats"}:
+            features = stats
+        else:
+            features = np.column_stack([raw, stats])
+        return np.asarray(features, dtype=np.float64), anchor
+
+    def fit(self, seq, target, key_padding_mask=None):
+        import numpy as np
+
+        features, anchor = self._engineered_features(seq, key_padding_mask)
+        if torch.is_tensor(target):
+            y = target.detach().cpu().numpy()
+        else:
+            y = np.asarray(target)
+        residual_target = y - self.residual_coefficient * anchor
+        self.estimator.fit(features, residual_target)
+        return self
+
+    def predict(self, seq, key_padding_mask=None):
+        import numpy as np
+
+        features, anchor = self._engineered_features(seq, key_padding_mask)
+        residual = np.asarray(self.estimator.predict(features), dtype=np.float64)
+        return residual + self.residual_coefficient * anchor
+
+    def score(self, seq, target, key_padding_mask=None):
+        from sklearn.metrics import r2_score
+
+        if torch.is_tensor(target):
+            y = target.detach().cpu().numpy()
+        else:
+            y = target
+        return r2_score(y, self.predict(seq, key_padding_mask))
 
 
 class XGBoostWL(_SKLearnWallProfileRegressor):

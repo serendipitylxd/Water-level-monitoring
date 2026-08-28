@@ -1,0 +1,25 @@
+{
+  "protocol": "water-level estimation on the frozen detector test shard",
+  "num_frames": 8000,
+  "num_operations": 18,
+  "operation_disjoint": true,
+  "split_counts": {
+    "train": 4845,
+    "val": 977,
+    "test": 2178
+  },
+  "split_operations": {
+    "train": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "val": [11, 12, 13],
+    "test": [14, 15, 16, 17, 18]
+  },
+  "split_dates": {
+    "train": ["2024-07-17", "2024-07-18"],
+    "val": ["2024-07-18"],
+    "test": ["2024-07-19"]
+  },
+  "held_out_test_day": true,
+  "evaluation_manifest_sha256": "5afe19307d7fa5c6fb4ddf16ce8a6778212773f7ca53f4313a6644e67d0ef869",
+  "public_manifest_sha256": "7e23f357aa8ede69f9aae63038b76c8bc6ea028a468e624d745eae559f1f5e86",
+  "public_export_note": "Only points_path and annotation_path were replaced by portable public placeholders; sample identities, labels, timestamps, operations, and split roles are unchanged."
+}

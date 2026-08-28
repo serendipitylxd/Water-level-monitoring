@@ -1,0 +1,36 @@
+{
+  "protocol": "measured full frozen six-detector plus Random-Forest causal-output plus Kalman pipeline",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 4080",
+    "cpu_architecture": "x86_64"
+  },
+  "software": {
+    "python": "3.8.20",
+    "torch": "2.1.0",
+    "cuda_runtime": "11.8"
+  },
+  "batch_size": 1,
+  "operations": [14, 15, 16, 17, 18],
+  "warmup_frames_per_operation": 10,
+  "measured_frames_per_operation": 20,
+  "measured_frames": 100,
+  "detector_execution": "all six frozen detectors resident together and executed sequentially on one GPU",
+  "estimated_parallel_latency_used": false,
+  "measurement_scope": "point-cloud disk read, six detector input preparations and inferences, fusion, point removal, wall-profile construction, Random Forest, causal stabilizer, and Kalman update",
+  "excluded": [
+    "process startup",
+    "configuration parsing",
+    "checkpoint and model loading"
+  ],
+  "fusion": {
+    "score_threshold": 0.4,
+    "bev_iou_threshold": 0.7,
+    "vote_ratio": 0.5,
+    "votes_required": 3
+  },
+  "mean_end_to_end_ms": 561.038417,
+  "sample_sd_end_to_end_ms": 46.961901,
+  "median_end_to_end_ms": 544.642054,
+  "p95_end_to_end_ms": 652.991230,
+  "throughput_fps_from_mean_end_to_end": 1.782409
+}

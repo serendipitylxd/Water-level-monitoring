@@ -1,174 +1,205 @@
-# Water Level Monitoring in Ship Locks 🚢
+# LiDAR Water-Level Monitoring in Navigation Locks
 
-This repository provides the code and models for **non-contact water level monitoring in confined lock chambers** using LiDAR point clouds and deep temporal regression.  
-It is based on our research on centimeter-level water level estimation in the Shiqiao Ship Lock using the TROUT multimodal dataset. 
+This repository contains the code and reproducibility artifacts for **LiDAR-Based Noncontact Water-Level Sensing in Navigation Locks via Wall-Belt Geometry and Temporal Filtering**. The pipeline removes ships and lock infrastructure with a frozen six-detector ensemble, constructs wall-belt height profiles, estimates water level with regression models, and optionally applies causal stabilization and Kalman filtering.
 
-**Highlights**: 
-* The code has been published, (Sep. 2025)
-* The code supports one-click operation.
+The current release uses operation-disjoint evaluation. The earlier frame-random artifacts under `outputs/wl_*` are retained only for historical compatibility and are not the results reported below.
 
+## What changed in v0.3.0
 
-## Overview
-- [Changelog](#changelog)
-- [Model Zoo](#model-zoo)
-- [Installation](#installation)
-- [Getting Started](#GETTING-STARTED)
-- [Citation](#citation)
+- Added the exact 8,000-frame water-level manifest with 18 lock operations.
+- Added the fixed operation split: operations 1–10 for training, 11–13 for validation, and 14–18 for testing.
+- Added per-operation results for all 13 estimators.
+- Added 18-fold leave-one-operation-out evaluation for Linear Regression, MLP, Random Forest, and HGRN.
+- Added paired primary-output versus Kalman-output lag analysis.
+- Added staff-gauge reference uncertainty and measured end-to-end runtime artifacts.
+- Updated the training, evaluation, Random Forest, and feature-cache code used by the revised protocol.
+- Replaced machine-specific paths with repository-relative paths or public placeholders.
 
+## Evaluation protocol
 
-## Changelog
-[2025-09-26] `Water-level-monitoring` v0.1.0 is released. 
+The detector corpus contains 16,000 annotated frames. The water-level study uses only the 8,000-frame detector-test shard, so detector-development frames are excluded from water-level model fitting and evaluation. These 8,000 frames cover 18 complete lock operations collected over three days.
 
-[2026-05-22] `Water-level-monitoring` v0.2.0 is released. 
+| Role | Operations | Frames | Dates |
+|---|---:|---:|---|
+| Training | 1–10 | 4,845 | 2024-07-17 to 2024-07-18 |
+| Validation | 11–13 | 977 | 2024-07-18 |
+| Test | 14–18 | 2,178 | 2024-07-19 |
 
+No operation appears in more than one role, and the test operations are also day-disjoint from the development operations. The native LiDAR rate is 10 Hz; the released water-level shard retains approximately one timestamp-selected frame every 2 s, with longer gaps where scans are missing.
 
-## Introduction
-This project provides a unified deep learning framework for non-contact water level monitoring in ship locks using LiDAR point clouds and temporal regression models.
+The public manifest is [`splits/waterlevel_test_only_8000/manifest.csv`](splits/waterlevel_test_only_8000/manifest.csv), and its split audit is [`audit.json`](splits/waterlevel_test_only_8000/audit.json).
 
+## Fixed-test results
 
-Main contributions:
-- ✅ **Wall-band point cloud extraction**: Removes ships and lock gates with 3D detection and constructs water-band sequences along chamber walls. 
-- ✅ **Deep temporal regression**: Supports multiple backbone models. 
-- ✅ **Spatial-temporal filtering**: Combines bounding-box–based point removal and online Kalman filtering for robust estimation. 
-- ✅ **Evaluation pipeline**: Centimeter-level MAE and RMSE on real-world TROUT dataset. 
+The table reports pooled metrics on operations 14–18. Error metrics are in centimetres; correlation is in percent. “KF RMSE” is computed after the model's primary output. The Random Forest primary output includes its validation-selected causal first-order stabilizer.
 
+| Model | MAE | RMSE | Bias | Corr | KF RMSE |
+|---|---:|---:|---:|---:|---:|
+| Linear Regression | 31.76 | 42.02 | -5.43 | 28.78 | 33.12 |
+| Ridge Regression | 30.21 | 38.48 | -4.29 | 30.01 | 31.65 |
+| SVR | 6.31 | 7.84 | +5.12 | 12.21 | 7.37 |
+| Random Forest | **2.19** | **2.95** | **+1.50** | **68.70** | **2.95** |
+| MLP | 4.67 | 6.76 | +2.33 | 27.98 | 6.39 |
+| 1D-CNN | 5.31 | 6.66 | +5.03 | 31.03 | 6.48 |
+| HGRN | 5.40 | 6.67 | +5.34 | 28.96 | 6.66 |
+| Hyena | 6.15 | 7.49 | +6.07 | 30.20 | 7.49 |
+| Mamba | 5.36 | 6.72 | +5.18 | 22.07 | 6.72 |
+| MEGA | 9.38 | 10.51 | +9.38 | 20.59 | 10.49 |
+| RetNet | 6.53 | 7.96 | +6.33 | 31.77 | 7.95 |
+| RWKV | 8.26 | 9.35 | +8.26 | 11.60 | 9.35 |
+| Transformer | 6.96 | 8.43 | +6.87 | 24.31 | 8.42 |
 
-- DATA at：[PCDet_TROUT_data](https://drive.google.com/file/d/1JCClYd6egTm0AxXtW80L18AySgG45_og/view?usp=sharing).
+Exact floating-point values and all 65 model-operation rows are available in [`results/operation_split`](results/operation_split/README.md).
 
+## Leave-one-operation-out evaluation
 
-<p align="center">
-  <img src="docs/water-level-monitoring.png" width="95%">
-</p>
+Each fold holds out one entire operation and fits on the other 17. Hyperparameters and epoch counts remain fixed across folds. Values below are operation-macro mean ± sample standard deviation in centimetres.
 
+| Model | Primary MAE | Primary RMSE | KF MAE | KF RMSE |
+|---|---:|---:|---:|---:|
+| Linear Regression | 26.74 ± 9.24 | 36.72 ± 13.48 | 22.45 ± 9.80 | 30.37 ± 13.80 |
+| MLP | 5.17 ± 2.89 | 6.85 ± 3.85 | 5.02 ± 2.86 | 6.47 ± 3.69 |
+| Random Forest | **1.53 ± 0.45** | **2.19 ± 0.64** | **1.53 ± 0.45** | **2.19 ± 0.64** |
+| HGRN | 2.79 ± 1.26 | 3.54 ± 1.36 | 2.79 ± 1.27 | 3.56 ± 1.38 |
 
+## Repository layout
 
-## Model Zoo
-
-### Water Level Monitoring in Ship Locks Baselines
-* All models are trained with GTX 4080 GPU and are available for download. 
-
-|                                             |  MAE(cm) | RMSE(cm)  | Bias(cm) | Corr  |
-|---------------------------------------------|:-------:|:---------:|:-------:|:-------:|
-| wl_hrgn | 1.77 | 2.27| 0.08 | 96.98 |
-| wl_linear_regression | 19.35 | 28.37 | 12.46 | 37.14 |
-| wl_random_forest | 1.39 | 1.83 | 0.04 | 98.06 |
-| wl_mlp | 2.28 | 2.96 | 0.00 | 94.86 |
-
+```text
+configs/operation_split/              current 13-model operation-split configs
+outputs/det3d/                        frozen per-detector and fused detections
+pcdet_models/config/                  OpenPCDet model configs
+results/operation_split/              lightweight tables and protocol audits
+scripts/                              training, evaluation, LOOCV, lag, and runtime tools
+splits/waterlevel_test_only_8000/     public 8,000-frame manifest and split audit
+trout_add_info/                       legacy timestamp/water-level metadata
+utils/                                data, model, metric, and filtering utilities
+```
 
 ## Installation
 
-
-If you want to implement 3D detection on your own computer and obtain the final detection result, you need to install the PCDet_trout environment. Please refer to the [PCDet_trout_github](https://github.com/serendipitylxd/Hydro3DNet) installation method.
-Of course, we have also provided ready-made 3D detection results in the outputs/det3d file,so you don't have to install the PCDet_trout environment.
-
-1. Create a new conda environment (recommended):
+Python 3.8 and the CUDA 11.8 build of PyTorch 2.1.0 were used for the reported runs.
 
 ```bash
 conda create -n trout python=3.8
 conda activate trout
-```
-
-2. Install PyTorch with CUDA 11.8 (make sure your CUDA version matches):
-
-```bash
 pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu118
-```
-
-3. Install the remaining dependencies:
-
-```bash
 pip install -r requirements.txt
 ```
 
-## Getting Started
+OpenPCDet is required only to rerun the six 3D detectors. The repository already contains their fused detection JSON for the released shard. Detector setup and checkpoints follow [Hydro3DNet](https://github.com/serendipitylxd/Hydro3DNet).
 
-The checkpoint of the 3D model needs to be downloaded and placed in the corresponding path
+## Data and portable paths
 
-[dsvt_voxel_trout_99M](https://drive.google.com/file/d/1ogt1wMTLQ1vDvJhzAiHGpQztLJH6wF_9/view?usp=sharing)
+Download the TROUT data archive from [Google Drive](https://drive.google.com/file/d/1E5cQHYgv8s7pCfQyvnH2FvPhxDPe2lxb/view?usp=sharing), then set the dataset root. Keep the placeholder style in committed files; do not commit a local absolute path.
 
-[pointpillar_trout_58M](https://drive.google.com/file/d/18jLmXM-chjmL1iEtMOzgqvEXxqhz-Hee/view?usp=sharing) 
-
-[pv_rcnn_trout_158M](https://drive.google.com/file/d/11ld6ZocQq39RsFXT_AO4-qH0Qg38XDxd/view?usp=sharing)
-
-[pv_rcnn_plusplus_trout_169M](https://drive.google.com/file/d/1kCMnxVuFaLpKpMWynIiBbFY7-WKGXwyY/view?usp=sharing)
-
-[second_trout_58M](https://drive.google.com/file/d/1jsgBfjvD0Aa7_ywrZR7-zrOrc_WK_Yjz/view?usp=sharing)
-
-[voxel_mamba_trout_142M](https://drive.google.com/file/d/1j6-VIsT_YAJLACLVLMxmxSK5cilgEnfV/view?usp=sharing)
-```
-Water-level-monitoring
-├── pcdet_models
-│   ├── checkpoint
-│   │   │── dsvt_voxel.pth
-│   │   │── convnext.pth
-│   │   │── pv_rcnn.pth
-│   │   │── pv_rcnn_plusplus.pth
-│   │   │── second.pth
-│   │   │── voxel_mamba.pth
+```bash
+export TROUT_ROOT=path/to/TROUT
 ```
 
-### How to use TROUT data sets for training and evaluation
+The manifest expands `${TROUT_ROOT}` at runtime. As an alternative, generate a git-ignored local manifest:
 
-### How to use TROUT datasets for training and evaluation
-
-1. **Prepare dataset folders**
-
-Before running, you need to download [PCDet_TROUT_data](https://drive.google.com/file/d/1JCClYd6egTm0AxXtW80L18AySgG45_og/view?usp=sharing) first, and then update the relevant paths of 'configs/infer_3d_pcdet.yaml' and 'configs/wl_xxx.yaml'.
-
-2. 3D detection results (optional)
-
-The relevant json for 3D object detection has been pre-calculated and saved, and placed in the path outputs/det3d folder.
-
-If you want to run OpenPCDet inference to generate 3D detection results, use:
-
-```shell
-python scripts/infer_3d_pcdet.py --cfg configs/infer_3d_pcdet.yaml
-```
-This will produce *.det3d.json per model and a fused result.
-
-3. **Train a model**
-
-Example (Transformer backbone):
-
-```shell
-python scripts/train_wl.py --cfg configs/wl_transformer.yaml
+```bash
+python scripts/relocate_manifest.py \
+  --points-dir path/to/TROUT/points_test \
+  --check-files
 ```
 
-The model checkpoint and validation metrics will be saved in outputs/<model_name>/.
+If using `manifest.local.csv`, change `data.operation_manifest_path` only in your uncommitted local config.
 
-4. Evaluate a model
+Run the public-path guard before committing changes:
 
-Example:
-
-```shell
-python scripts/eval_wl.py --cfg configs/wl_transformer.yaml
+```bash
+python scripts/check_public_paths.py
 ```
 
-This will generate:
+## Reproduce the water-level experiments
 
-predictions.csv with per-frame ground truth and predictions
+### 1. Optional: rerun the detector ensemble
 
-eval_results(test_dataset).txt with MAE, RMSE, Bias, Corr
+Edit only the public placeholders in `configs/infer_3d_pcdet.yaml`, then run:
+
+```bash
+python scripts/infer_3d_pcdet.py \
+  --cfg configs/infer_3d_pcdet.yaml \
+  --pcdet_tools path/to/OpenPCDet/tools
+```
+
+Fusion uses a score threshold of 0.40, BEV IoU threshold of 0.70, and vote ratio of 0.50, requiring agreement from at least three of six detectors.
+
+### 2. Build the deterministic wall-profile cache
+
+```bash
+python scripts/build_manifest_feature_cache.py \
+  --cfg configs/operation_split/wl_hgrn.yaml
+```
+
+The cache contains features and masks, not target labels. Its manifest and preprocessing hashes are checked when loaded.
+
+### 3. Run the fixed 13-model benchmark
+
+```bash
+python scripts/run_operation_benchmark.py \
+  --manifest splits/waterlevel_test_only_8000/manifest.csv \
+  --continue-on-error
+```
+
+The classical and neural estimators share the same samples, geometry, feature cache, and semantic split. Model outputs are written under `outputs_operation_split/test_only_8000/fixed/`.
+
+### 4. Run the Random Forest primary pipeline
+
+All selection below uses development operations only. The selected model is refit on operations 1–13 before evaluating operations 14–18.
+
+```bash
+python scripts/tune_anchored_random_forest_operation_split.py tune \
+  --coefficient-objective robust_average_rmse
+python scripts/tune_anchored_random_forest_operation_split.py refit
+python scripts/tune_anchored_random_forest_operation_split.py evaluate
+python scripts/compose_rf_manuscript_reporting.py
+```
+
+### 5. Run four-model LOOCV
+
+```bash
+python scripts/run_operation_loocv.py --cfg configs/operation_split/wl_linear_regression.yaml --epochs 1 --run
+python scripts/run_operation_loocv.py --cfg configs/operation_split/wl_mlp.yaml --epochs 22 --run
+python scripts/run_operation_loocv.py --cfg configs/operation_split/wl_hgrn.yaml --epochs 36 --run
+python scripts/run_anchored_rf_loocv.py \
+  --frozen outputs_operation_split/test_only_8000/rf_tuned_robust_anchor/frozen_selection.json
+python scripts/summarize_loocv_benchmark.py
+```
+
+### 6. Reference and timing audits
+
+```bash
+python scripts/audit_test_only_reference_protocol.py
+python scripts/benchmark_full_frozen_pipeline.py \
+  --pcdet-tools path/to/OpenPCDet/tools
+```
+
+The measured full pipeline averaged 561.04 ± 46.96 ms per frame on one RTX 4080 (100 measured frames after warm-up), corresponding to 1.78 frames/s. Stage-level values are included in the result artifacts.
+
+## Detector accuracy
+
+| Detector | Ship mAP\_3D (test) | Infra mAP\_3D (test) |
+|---|---:|---:|
+| PointPillars | 61.6 | 99.4 |
+| SECOND | 51.6 | 98.6 |
+| DSVT-Voxel | 54.7 | 95.5 |
+| Voxel-Mamba | 57.8 | 96.2 |
+| PV-RCNN | 88.1 | 99.8 |
+| PV-RCNN++ | 88.5 | 99.9 |
 
 ## License
-`Water-level-monitoring` is released under the [Apache 2.0 license](LICENSE).
 
-## Acknowledgement
-
-We hope that this repo will serve as a powerful and flexible code base that will benefit the research community by accelerating the process of re-implementing previous work and/or developing new methods.
+This project is released under the [Apache License 2.0](LICENSE).
 
 ## Citation
-If you find this project useful in your research, please consider cite:
 
-
-```
-@misc{Water-level-monitoring2025,
-    title={A Unified Deep Temporal Framework for Water Level Monitoring Using Wall-Belt Point Clouds},
-    author={Xiaodong Lu},
-    howpublished = {\url{https://github.com/serendipitylxd/Water-level-monitoring}},
-    year={2025}
+```bibtex
+@software{lu2026waterlevelmonitoring,
+  author  = {Xiaodong Lu},
+  title   = {LiDAR-Based Noncontact Water-Level Sensing in Navigation Locks via Wall-Belt Geometry and Temporal Filtering},
+  year    = {2026},
+  url     = {https://github.com/serendipitylxd/Water-level-monitoring}
 }
 ```
-
-## Contribution
-Welcome to be a member of the `TROUT` development team by contributing to this repo, and feel free to contact us for any potential contributions. 

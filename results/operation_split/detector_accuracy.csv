@@ -1,0 +1,7 @@
+model,Ship_mAP_3D_test,Infra_mAP_3D_test
+PointPillars,61.6,99.4
+SECOND,51.6,98.6
+DSVT-Voxel,54.7,95.5
+Voxel-Mamba,57.8,96.2
+PV-RCNN,88.1,99.8
+PV-RCNN++,88.5,99.9

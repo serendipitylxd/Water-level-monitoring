@@ -1,6 +1,7 @@
 # scripts/train_wl.py
 # -*- coding: utf-8 -*-
-import os, sys, re, argparse, inspect, pickle
+import os, sys, re, argparse, inspect, pickle, json, shutil, hashlib
+from collections import Counter
 from typing import Tuple
 import numpy as np
 import torch
@@ -14,7 +15,15 @@ sys.path.insert(0, REPO_ROOT)
 
 # Reuse common utilities
 from utils.io import load_yaml, ensure_dir, resolve_path, seed_everything
-from utils.data import parse_add_info, WLFrames, collate_fn
+from utils.data import (
+    parse_add_info,
+    WLFrames,
+    collate_fn,
+    load_operation_manifest,
+    validate_operation_manifest,
+    ManifestWLFrames,
+    collate_manifest,
+)
 from utils.metrics import eval_metrics
 from utils.trainer import build_model as build_existing_model
 from utils import models as wl_models
@@ -220,8 +229,128 @@ def train_sklearn_main(model, dl_tr, dl_va, out_dir: str):
     print(f"[done] saved sklearn model: {pkl_path}")
     print(f"[done] legacy copy: {legacy_path}")
 
+def _build_manifest_dataset(
+    records, geom: dict, wl_cfg: dict, feature_cache_path: str = None
+):
+    x_min, x_max = geom["chamber_x_range"]
+    y_min, y_max = geom["chamber_y_range"]
+    return ManifestWLFrames(
+        records,
+        x_min, x_max, y_min, y_max,
+        wl_cfg["wall_band_x_half"], wl_cfg["y_bin"],
+        wl_cfg["quantile_low"], wl_cfg["qc_min_pts"],
+        wl_cfg["inflate_xy"], wl_cfg["inflate_z"],
+        wl_cfg.get("extra_remove_3d_labels", []),
+        use_point_removal=wl_cfg.get("ablation", {}).get(
+            "use_point_removal", True
+        ),
+        feature_cache_path=feature_cache_path,
+    )
+
+
+def _manifest_provenance(records, manifest_path: str, audit: dict) -> dict:
+    split_details = {}
+    for split in ("train", "val", "test"):
+        selected = [record for record in records if record["split"] == split]
+        split_details[split] = {
+            "num_frames": len(selected),
+            "operations": sorted({int(record["operation_id"]) for record in selected}),
+            "dates": sorted({str(record["date"]) for record in selected}),
+            "sources": dict(sorted(Counter(str(record["source"]) for record in selected).items())),
+            "annotation_types": dict(
+                sorted(Counter(str(record["annotation_type"]) for record in selected).items())
+            ),
+        }
+    with open(manifest_path, "rb") as handle:
+        manifest_sha256 = hashlib.sha256(handle.read()).hexdigest()
+    return {
+        "protocol": "operation-wise",
+        "manifest_path": os.path.abspath(manifest_path),
+        "manifest_sha256": manifest_sha256,
+        "audit": audit,
+        "splits": split_details,
+    }
+
+
+def _save_manifest_provenance(out_dir: str, context: dict) -> None:
+    manifest_path = context["manifest_path"]
+    copied_manifest = os.path.join(out_dir, "split_manifest.csv")
+    if os.path.abspath(manifest_path) != os.path.abspath(copied_manifest):
+        shutil.copy2(manifest_path, copied_manifest)
+    summary_path = os.path.join(out_dir, "split_summary.json")
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        json.dump(context["provenance"], handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    print(f"[split] manifest={manifest_path}")
+    for split, item in context["provenance"]["splits"].items():
+        print(
+            f"[split] {split}: frames={item['num_frames']} "
+            f"operations={item['operations']} dates={item['dates']}"
+        )
+    annotation_types = sorted(
+        {
+            annotation_type
+            for item in context["provenance"]["splits"].values()
+            for annotation_type in item["annotation_types"]
+        }
+    )
+    if len(annotation_types) > 1:
+        print(
+            "[WARNING] Manifest mixes annotation backends "
+            f"{annotation_types}. Before final paper runs, generate frozen "
+            "detector outputs for legacy_train and rebuild the manifest with "
+            "--train-det3d-json."
+        )
+    print(f"[split] saved provenance: {summary_path}")
+
+
 def build_datasets(cfg_dir: str, sub: dict, geom: dict, wl_cfg: dict, data_cfg: dict):
-    """First 6000 for training, last 2000 for validation (adaptive if insufficient), same as original logic."""
+    """Build manifest-based operation splits, with a legacy fallback."""
+    manifest_cfg = data_cfg.get("operation_manifest_path")
+    if manifest_cfg:
+        manifest_path = resolve_path(cfg_dir, manifest_cfg)
+        records = load_operation_manifest(
+            manifest_path,
+            validate_paths=bool(data_cfg.get("manifest_validate_paths", True)),
+        )
+        audit = validate_operation_manifest(records)
+        train_name = str(data_cfg.get("train_split", "train"))
+        val_name = str(data_cfg.get("val_split", "val"))
+        train_records = [record for record in records if record["split"] == train_name]
+        val_records = [record for record in records if record["split"] == val_name]
+        if not train_records:
+            raise RuntimeError(
+                f"Operation manifest has no records for train split {train_name!r}"
+            )
+        feature_cache_cfg = data_cfg.get("feature_cache_path")
+        feature_cache_path = (
+            resolve_path(cfg_dir, feature_cache_cfg) if feature_cache_cfg else None
+        )
+        ds_tr = _build_manifest_dataset(
+            train_records, geom, wl_cfg, feature_cache_path=feature_cache_path
+        )
+        ds_va = (
+            _build_manifest_dataset(
+                val_records, geom, wl_cfg, feature_cache_path=feature_cache_path
+            )
+            if val_records
+            else None
+        )
+        provenance = _manifest_provenance(records, manifest_path, audit)
+        if feature_cache_path:
+            with open(feature_cache_path, "rb") as handle:
+                cache_sha256 = hashlib.sha256(handle.read()).hexdigest()
+            provenance["feature_cache"] = {
+                "path": os.path.abspath(feature_cache_path),
+                "sha256": cache_sha256,
+            }
+        context = {
+            "manifest_path": manifest_path,
+            "provenance": provenance,
+        }
+        return ds_tr, ds_va, collate_manifest, context
+
+    # Legacy frame-wise path retained only for old-result reproducibility.
     pts_dir = resolve_path(cfg_dir, data_cfg["points_training_dir"])
     lbl_dir = resolve_path(cfg_dir, data_cfg.get("labels_training_dir"))
     add_tr  = resolve_path(cfg_dir, sub["add_info_training_path"])
@@ -253,7 +382,7 @@ def build_datasets(cfg_dir: str, sub: dict, geom: dict, wl_cfg: dict, data_cfg: 
         wl_cfg.get("extra_remove_3d_labels", []),
         use_point_removal=wl_cfg.get("ablation", {}).get("use_point_removal", True)
     ) if n_val > 0 else None
-    return ds_tr, ds_va
+    return ds_tr, ds_va, collate_fn, None
 
 # ---------------------------
 # Main training flow 
@@ -271,7 +400,9 @@ def train_main(cfg_path: str):
     geom     = cfg["geometry"]
 
     # Output path
-    out_root = cfg.get("output", {}).get("root", "./outputs")
+    out_root = resolve_path(
+        cfg_dir, cfg.get("output", {}).get("root", "./outputs")
+    )
     out_dir  = os.path.join(out_root, section["out_dir"])
     ensure_dir(out_dir)
 
@@ -285,9 +416,26 @@ def train_main(cfg_path: str):
     seed_everything(seed)
 
     # DataLoaders
-    ds_tr, ds_va = build_datasets(cfg_dir, section, geom, wl_cfg, data_cfg)
-    dl_tr = DataLoader(ds_tr, batch_size=batch, shuffle=True,  num_workers=4, collate_fn=collate_fn, pin_memory=True)
-    dl_va = DataLoader(ds_va, batch_size=batch, shuffle=False, num_workers=2, collate_fn=collate_fn, pin_memory=True) if ds_va is not None else None
+    ds_tr, ds_va, active_collate_fn, split_context = build_datasets(
+        cfg_dir, section, geom, wl_cfg, data_cfg
+    )
+    if split_context is not None:
+        _save_manifest_provenance(out_dir, split_context)
+    else:
+        print(
+            "[WARNING] No data.operation_manifest_path configured; using the "
+            "legacy frame-wise split. Do not use this mode for revised paper results."
+        )
+    num_workers_train = int(tr_cfg.get("num_workers", 4))
+    num_workers_val = int(tr_cfg.get("val_num_workers", 2))
+    dl_tr = DataLoader(
+        ds_tr, batch_size=batch, shuffle=True,
+        num_workers=num_workers_train, collate_fn=active_collate_fn, pin_memory=True
+    )
+    dl_va = DataLoader(
+        ds_va, batch_size=batch, shuffle=False,
+        num_workers=num_workers_val, collate_fn=active_collate_fn, pin_memory=True
+    ) if ds_va is not None else None
 
     # Model
     model = build_wl_model(kind, section["model"])
@@ -407,4 +555,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

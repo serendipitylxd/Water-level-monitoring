@@ -21,22 +21,27 @@ def resolve_path(cfg_dir: str, p: Optional[str]) -> Optional[str]:
     解析路径优先级：
     1) 绝对路径
     2) 相对 config.yaml 目录
-    3) 相对仓库根目录（config 上一级）
+    3) 相对仓库根目录
     4) 相对当前工作目录（CWD）
     """
     if p is None:
         return None
-    p = os.path.expanduser(str(p))
+    p = os.path.expandvars(os.path.expanduser(str(p)))
     if os.path.isabs(p):
         return p
     p1 = os.path.join(cfg_dir, p)
     if os.path.exists(p1):
         return p1
-    repo_root = os.path.abspath(os.path.join(cfg_dir, os.pardir))
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
     p2 = os.path.join(repo_root, p)
     if os.path.exists(p2):
         return p2
-    return os.path.abspath(p)
+    p3 = os.path.abspath(os.path.join(os.getcwd(), p))
+    if os.path.exists(p3):
+        return p3
+    # New output paths and public placeholders normally do not exist yet.
+    # Treat them as repository-relative to make execution independent of CWD.
+    return p2
 
 def seed_everything(seed: int = 42):
     random.seed(seed)
@@ -48,4 +53,3 @@ def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cfg", required=True, help="path to config yaml")
     return ap.parse_args()
-

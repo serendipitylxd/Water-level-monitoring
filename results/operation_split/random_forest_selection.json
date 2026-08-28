@@ -1,0 +1,47 @@
+{
+  "protocol": "Random-Forest selection on development operations",
+  "feature_mode": "raw_stats",
+  "residual_anchor": "min_both",
+  "residual_coefficient": 0.55,
+  "coefficient_selection": {
+    "objective": "robust_average_rmse",
+    "operations": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+    "used_test_operations": false
+  },
+  "forest_parameter_selection": {
+    "training_operations": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "validation_operations": [11, 12, 13],
+    "num_candidates": 49,
+    "random_seed": 42,
+    "objective": "validation operation-macro RMSE with pooled RMSE tie-break",
+    "used_test_operations": false,
+    "best_parameters": {
+      "n_estimators": 384,
+      "criterion": "squared_error",
+      "max_depth": null,
+      "min_samples_split": 16,
+      "min_samples_leaf": 4,
+      "max_features": 0.4,
+      "bootstrap": true,
+      "max_samples": null,
+      "ccp_alpha": 0.0,
+      "weighting": "operation_balanced"
+    }
+  },
+  "causal_stabilizer": {
+    "alpha": 0.7,
+    "causal": true,
+    "reset_at_operation_boundary": true,
+    "selected_on_validation_operations": [11, 12, 13]
+  },
+  "kalman_filter": {
+    "base_R": 0.001,
+    "q_pos": 0.01,
+    "q_vel": 1e-08,
+    "selected_on_validation_operations": [11, 12, 13]
+  },
+  "final_fit_operations": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+  "evaluation_operations": [14, 15, 16, 17, 18],
+  "evaluation_manifest_sha256": "5afe19307d7fa5c6fb4ddf16ce8a6778212773f7ca53f4313a6644e67d0ef869",
+  "feature_cache_sha256": "3fa00783564cada6175e8d01b217b82011d756ac92c74e366c0032d9770fbc91"
+}

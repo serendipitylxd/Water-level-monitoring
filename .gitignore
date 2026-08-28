@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.building
+.DS_Store
+.idea/
+.vscode/
+
+# User-specific paths, regenerated feature caches, and new checkpoints.
+splits/**/manifest.local.csv
+outputs_operation_split/
+pcdet_models/checkpoint/
+*.npz
