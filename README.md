@@ -4,6 +4,14 @@ This repository contains the code and reproducibility artifacts for **LiDAR-Base
 
 The current release uses operation-disjoint evaluation. The earlier frame-random artifacts under `outputs/wl_*` are retained only for historical compatibility and are not the results reported below.
 
+## Release history
+
+| Release | Release date |
+|---|---|
+| v0.1.0 | 2025-09-26 |
+| v0.2.0 | 2026-05-22 |
+| v0.3.0 | 2026-08-28 |
+
 ## What changed in v0.3.0
 
 - Added the exact 8,000-frame water-level manifest with 18 lock operations.
